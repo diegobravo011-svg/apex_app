@@ -11,24 +11,129 @@ import {
   upsertWeek,
 } from "./lib/db";
 
-// ─── PROTOCOL TEMPLATE ───────────────────────────────────────────────────────
-const BASE_DAYS = {
+// ─── PROTOCOL CONTEXT PER DAY ─────────────────────────────────────────────────
+const DAY_PROTOCOL = {
   lun: {
-    label: "Lunes", name: "Piernas", type: "Resistencia",
-    warmup: true, isCardio: false,
-    exercises: [
-      { name: "Leg Curls",             muscle: "Cuádriceps · alargado",    weight: "", reps: "4×8" },
-      { name: "Squat",                 muscle: "Cuádriceps · acortado",    weight: "", reps: "4×10" },
-      { name: "Romanian Dead Lift",    muscle: "Isquiotibiales · alargado", weight: "", reps: "4×8" },
-      { name: "Hamstring Curl",        muscle: "Isquiotibiales · acortado", weight: "", reps: "3×8" },
-      { name: "Standing Calf Raise",   muscle: "Pantorrillas · alargado",  weight: "", reps: "3×15" },
-      { name: "Seated Calf Raise",     muscle: "Pantorrillas · acortado",  weight: "", reps: "3×10" },
-      { name: "Leg Raises",            muscle: "Abdominales",              weight: "—", reps: "3×15" },
-    ],
+    scheduleNote: (s) => s === "A"
+      ? { sets: "3–4 sets · 4–8 reps", rest: "Descanso 2–4 min entre sets" }
+      : { sets: "2–3 sets · 8–15 reps", rest: "Descanso ~90 s entre sets" },
+    tip1: "Ejercicio #1 → músculo en posición acortada (leg curl, seated calf, leg extension).",
+    tip2: "Ejercicio #2 → resistencia en posición alargada (squat profundo, standing calf, RDL).",
+    breath: "Entre sets: 2 inhales nasales + 1 exhale completo (suspiro fisiológico).",
+    warmup: "Calentamiento dinámico 10 min antes de cargar.",
   },
   mar: {
-    label: "Martes", name: "Recuperación", type: "Calor & Frío",
-    warmup: false, isCardio: true,
+    tip1: "Cardio suave (Zona 1) + movilidad dinámica: WGS, 90/90, Cat-Cow, Deep Squat.",
+    tip2: "Ducha fría para acelerar recuperación muscular.",
+    breath: "Respiración lenta y profunda — baja el sistema nervioso simpático.",
+    warmup: null,
+  },
+  mie: {
+    scheduleNote: (s) => s === "A"
+      ? { sets: "3–4 sets · 4–8 reps", rest: "Descanso 2–4 min entre sets" }
+      : { sets: "2–3 sets · 8–15 reps", rest: "Descanso ~90 s entre sets" },
+    tip1: "Ejercicio #1 → músculo acortado (overhead press, lateral raise, cable crossover).",
+    tip2: "Ejercicio #2 → resistencia en alargado (incline press, incline curl, pull-up).",
+    breath: "Entre sets: suspiro fisiológico para bajar FC y optimizar recuperación.",
+    warmup: "Calentamiento 10 min — movilidad de hombros y escápulas.",
+  },
+  jue: {
+    tip1: "Zona 2: mantén 75–80% de esfuerzo percibido — puedes hablar en frases cortas.",
+    tip2: "35 min continuos: bici, remo, trote o elíptica.",
+    breath: "Respiración nasal en lo posible — señal de que estás en Zona 2.",
+    warmup: null,
+  },
+  vie: {
+    tip1: "HIIT: 8–12 rondas · sprint 20–60 s → recuperación activa 2 min.",
+    tip2: "La alta intensidad eleva GH y BDNF — clave para función cognitiva.",
+    breath: "Post-HIIT: 3–5 min de respiración lenta deliberada para bajar el sistema nervioso.",
+    warmup: null,
+  },
+  sab: {
+    scheduleNote: (s) => s === "A"
+      ? { sets: "3 sets · 6–8 reps", rest: "Descanso 2–4 min entre sets" }
+      : { sets: "2–3 sets · 8–15 reps", rest: "Descanso ~90 s entre sets" },
+    tip1: "Bíceps: alargado (incline curl) + acortado (hammer/preacher curl).",
+    tip2: "Tríceps: alargado (overhead extension) + acortado (dips/pushdown).",
+    breath: "Suspiro fisiológico entre sets. Estiramiento estático 30–60 s post-entreno.",
+    warmup: "Calentamiento 10 min — codo y muñeca.",
+  },
+  dom: {
+    tip1: "Zona 2 larga: 60–75 min a intensidad baja-moderada (conversación posible).",
+    tip2: "Óptimo para quema de grasa, salud cardiovascular y recuperación activa.",
+    breath: "Respiración nasal. Al terminar: 3–5 min de respiración lenta deliberada.",
+    warmup: null,
+  },
+};
+
+// ─── PROTOCOL TEMPLATE — SCHEDULE A (4–8 reps / 3–4 sets) ───────────────────
+const EXERCISES_A = {
+  lun: [
+    { name: "Leg Curls",             muscle: "Cuádriceps · acortado",    weight: "", reps: "4×6" },
+    { name: "Squat",                 muscle: "Cuádriceps · alargado",    weight: "", reps: "4×6" },
+    { name: "Romanian Dead Lift",    muscle: "Isquiotibiales · alargado", weight: "", reps: "4×6" },
+    { name: "Hamstring Curl",        muscle: "Isquiotibiales · acortado", weight: "", reps: "3×6" },
+    { name: "Standing Calf Raise",   muscle: "Pantorrillas · alargado",  weight: "", reps: "3×8" },
+    { name: "Seated Calf Raise",     muscle: "Pantorrillas · acortado",  weight: "", reps: "3×6" },
+    { name: "Leg Raises",            muscle: "Abdominales",              weight: "—", reps: "3×12" },
+  ],
+  mie: [
+    { name: "Overhead Press",        muscle: "Hombros · base",           weight: "", reps: "4×6" },
+    { name: "Flat Dumbbell Press",   muscle: "Pecho · base",             weight: "", reps: "4×8" },
+    { name: "Incline Press",         muscle: "Pecho · alargado",         weight: "", reps: "3×6" },
+    { name: "Seated Cable Row",      muscle: "Espalda · grosor",         weight: "", reps: "3×6" },
+    { name: "Chin-up / Pull-up",     muscle: "Espalda · alargado",       weight: "", reps: "3×6" },
+    { name: "Lateral Raise",         muscle: "Hombros · aislamiento",    weight: "", reps: "4×8" },
+    { name: "Eye Level Pull",        muscle: "Hombros · acortado",       weight: "", reps: "3×8" },
+    { name: "Plank / Dead Bug",      muscle: "Abdominales",              weight: "—", reps: "3×45s" },
+  ],
+  sab: [
+    { name: "Incline Curl",          muscle: "Bíceps · alargado",        weight: "", reps: "3×6" },
+    { name: "Hammer Curl",           muscle: "Bíceps · acortado",        weight: "", reps: "3×6" },
+    { name: "Overhead Extension",    muscle: "Tríceps · alargado",       weight: "", reps: "3×6" },
+    { name: "Triceps Dips",          muscle: "Tríceps · acortado",       weight: "", reps: "3×6" },
+    { name: "Standing + Seated Raise", muscle: "Pantorrillas",           weight: "", reps: "3×8" },
+    { name: "Tibialis Raise",        muscle: "Tibiales",                 weight: "", reps: "3×8" },
+    { name: "Russian Twists",        muscle: "Abdominales",              weight: "—", reps: "3×16" },
+  ],
+};
+
+// ─── PROTOCOL TEMPLATE — SCHEDULE B (8–15 reps / 2–3 sets) ──────────────────
+const EXERCISES_B = {
+  lun: [
+    { name: "Leg Curls",             muscle: "Cuádriceps · acortado",    weight: "", reps: "3×12" },
+    { name: "Squat",                 muscle: "Cuádriceps · alargado",    weight: "", reps: "3×12" },
+    { name: "Romanian Dead Lift",    muscle: "Isquiotibiales · alargado", weight: "", reps: "3×12" },
+    { name: "Hamstring Curl",        muscle: "Isquiotibiales · acortado", weight: "", reps: "2×12" },
+    { name: "Standing Calf Raise",   muscle: "Pantorrillas · alargado",  weight: "", reps: "3×15" },
+    { name: "Seated Calf Raise",     muscle: "Pantorrillas · acortado",  weight: "", reps: "3×12" },
+    { name: "Leg Raises",            muscle: "Abdominales",              weight: "—", reps: "3×20" },
+  ],
+  mie: [
+    { name: "Overhead Press",        muscle: "Hombros · base",           weight: "", reps: "3×12" },
+    { name: "Flat Dumbbell Press",   muscle: "Pecho · base",             weight: "", reps: "3×12" },
+    { name: "Incline Press",         muscle: "Pecho · alargado",         weight: "", reps: "3×10" },
+    { name: "Seated Cable Row",      muscle: "Espalda · grosor",         weight: "", reps: "3×12" },
+    { name: "Chin-up / Pull-up",     muscle: "Espalda · alargado",       weight: "", reps: "2×10" },
+    { name: "Lateral Raise",         muscle: "Hombros · aislamiento",    weight: "", reps: "3×15" },
+    { name: "Eye Level Pull",        muscle: "Hombros · acortado",       weight: "", reps: "3×12" },
+    { name: "Plank / Dead Bug",      muscle: "Abdominales",              weight: "—", reps: "3×60s" },
+  ],
+  sab: [
+    { name: "Incline Curl",          muscle: "Bíceps · alargado",        weight: "", reps: "3×10" },
+    { name: "Hammer Curl",           muscle: "Bíceps · acortado",        weight: "", reps: "3×10" },
+    { name: "Overhead Extension",    muscle: "Tríceps · alargado",       weight: "", reps: "3×10" },
+    { name: "Triceps Dips",          muscle: "Tríceps · acortado",       weight: "", reps: "3×10" },
+    { name: "Standing + Seated Raise", muscle: "Pantorrillas",           weight: "", reps: "3×12" },
+    { name: "Tibialis Raise",        muscle: "Tibiales",                 weight: "", reps: "3×12" },
+    { name: "Russian Twists",        muscle: "Abdominales",              weight: "—", reps: "3×20" },
+  ],
+};
+
+// ─── BASE DAYS (non-resistance days are the same regardless of schedule) ────
+const BASE_DAYS = {
+  lun: { label: "Lunes",    name: "Piernas",      type: "Resistencia",     warmup: true,  isCardio: false },
+  mar: { label: "Martes",   name: "Recuperación", type: "Calor & Frío",    warmup: false, isCardio: true,
     exercises: [
       { name: "Ducha fría",            muscle: "Recuperación",  activity: "" },
       { name: "Caminata / Natación",   muscle: "Cardio suave",  activity: "15–20 min" },
@@ -36,70 +141,50 @@ const BASE_DAYS = {
       { name: "Hidratación & Proteína", muscle: "Nutrición",    activity: "" },
     ],
   },
-  mie: {
-    label: "Miércoles", name: "Torso & Cuello", type: "Fuerza",
-    warmup: true, isCardio: false,
+  mie: { label: "Miércoles", name: "Torso & Cuello", type: "Fuerza",      warmup: true,  isCardio: false },
+  jue: { label: "Jueves",   name: "Cardio",        type: "Zona 2",          warmup: false, isCardio: true,
     exercises: [
-      { name: "Overhead Press",        muscle: "Hombros · base",           weight: "", reps: "3×8" },
-      { name: "Flat Dumbbell Press",   muscle: "Pecho · base",             weight: "", reps: "4×10" },
-      { name: "Incline Press",         muscle: "Pecho · alargado",         weight: "", reps: "3×8" },
-      { name: "Seated Cable Row",      muscle: "Espalda · grosor",         weight: "", reps: "3×8" },
-      { name: "Chin-up / Pull-up",     muscle: "Espalda · alargado",       weight: "", reps: "3×8" },
-      { name: "Lateral Raise",         muscle: "Hombros · aislamiento",    weight: "", reps: "4×15" },
-      { name: "Eye Level Pull",        muscle: "Hombros · acortado",       weight: "", reps: "3×12" },
-      { name: "Plank / Dead Bug",      muscle: "Abdominales",              weight: "—", reps: "3×60s" },
+      { name: "Cardio moderado", muscle: "35 min · 75–80% esfuerzo", activity: "" },
     ],
   },
-  jue: {
-    label: "Jueves", name: "Cardio", type: "Zona 2",
-    warmup: false, isCardio: true,
+  vie: { label: "Viernes",  name: "HIIT",          type: "Alta intensidad", warmup: false, isCardio: true,
     exercises: [
-      { name: "Cardio moderado",       muscle: "35 min · 75–80% esfuerzo", activity: "" },
+      { name: "HIIT",          muscle: "8–12 rondas · sprint 20–60s", activity: "" },
+      { name: "V-Ups / Bicicleta", muscle: "Abdominales",              activity: "3×20" },
     ],
   },
-  vie: {
-    label: "Viernes", name: "HIIT", type: "Alta intensidad",
-    warmup: false, isCardio: true,
+  sab: { label: "Sábado",   name: "Brazos",        type: "Fuerza",          warmup: true,  isCardio: false },
+  dom: { label: "Domingo",  name: "Zona 2 larga",  type: "Resistencia",     warmup: false, isCardio: true,
     exercises: [
-      { name: "HIIT",                  muscle: "8–12 rondas · sprint 20–60s", activity: "" },
-      { name: "V-Ups / Bicicleta",     muscle: "Abdominales",               activity: "3×20" },
-    ],
-  },
-  sab: {
-    label: "Sábado", name: "Brazos", type: "Fuerza",
-    warmup: true, isCardio: false,
-    exercises: [
-      { name: "Incline Curl",          muscle: "Bíceps · alargado",        weight: "", reps: "3×6–8" },
-      { name: "Hammer Curl",           muscle: "Bíceps · acortado",        weight: "", reps: "3×6–8" },
-      { name: "Overhead Extension",    muscle: "Tríceps · alargado",       weight: "", reps: "3×6–8" },
-      { name: "Triceps Dips",          muscle: "Tríceps · acortado",       weight: "", reps: "3×6–8" },
-      { name: "Standing + Seated Raise", muscle: "Pantorrillas",           weight: "", reps: "3×8" },
-      { name: "Tibialis Raise",        muscle: "Tibiales",                 weight: "", reps: "3×10–12" },
-      { name: "Russian Twists",        muscle: "Abdominales",              weight: "—", reps: "3×20" },
-    ],
-  },
-  dom: {
-    label: "Domingo", name: "Zona 2 larga", type: "Resistencia",
-    warmup: false, isCardio: true,
-    exercises: [
-      { name: "Cardio largo",          muscle: "60–75 min · Zona 2", activity: "" },
+      { name: "Cardio largo", muscle: "60–75 min · Zona 2", activity: "" },
     ],
   },
 };
 
+const RESISTANCE_DAYS = ["lun", "mie", "sab"];
 const DAY_ORDER = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"];
 const TODAY_IDX = Math.min(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1, 6);
 
-// Merge week data from Supabase with the template (labels, types, isCardio, warmup)
+// ─── GET EXERCISES BY SCHEDULE ────────────────────────────────────────────────
+const getExercisesForDay = (dayKey, scheduleStr) => {
+  if (RESISTANCE_DAYS.includes(dayKey)) {
+    const pool = scheduleStr === "A" ? EXERCISES_A : EXERCISES_B;
+    return pool[dayKey] || [];
+  }
+  return BASE_DAYS[dayKey]?.exercises || [];
+};
+
+// ─── MERGE WITH TEMPLATE ──────────────────────────────────────────────────────
 const mergeWithTemplate = (weekData) => {
   const merged = { ...weekData, days: {} };
+  const sched = weekData.schedule || "A";
   DAY_ORDER.forEach(d => {
     const tmpl = BASE_DAYS[d];
     const stored = weekData.days?.[d] || {};
     merged.days[d] = {
       ...tmpl,
       ...stored,
-      exercises: stored.exercises || tmpl.exercises.map((e, i) => ({
+      exercises: stored.exercises || getExercisesForDay(d, sched).map((e, i) => ({
         id: `${d}_${i}_local`,
         ...e,
         done: false,
@@ -119,6 +204,7 @@ export default function Apex({ user, onSignOut }) {
   const [newEx, setNewEx]         = useState({ name: "", muscle: "", weight: "", reps: "", activity: "" });
   const [chartEx, setChartEx]     = useState("Squat");
   const [toast, setToast]         = useState(null);
+  const [protocolOpen, setProtocolOpen] = useState(true);
 
   // ─── Remote state
   const [weeks, setWeeks]             = useState({});
@@ -138,13 +224,12 @@ export default function Apex({ user, onSignOut }) {
       try {
         let data = await loadAllData(user.id);
         if (!data) {
-          // First time — create week 1
           const weekData = await createFullWeek(user.id, 1, "A", BASE_DAYS);
           data = { currentWeekNum: 1, schedule: "A", weeks: { 1: weekData } };
         }
         setCurrentWeekNum(data.currentWeekNum);
         setSchedule(data.schedule);
-        setWeeks(prevWeeks => {
+        setWeeks(() => {
           const merged = {};
           for (const [wn, wd] of Object.entries(data.weeks)) {
             merged[wn] = mergeWithTemplate(wd);
@@ -185,14 +270,12 @@ export default function Apex({ user, onSignOut }) {
     const ex = exercises.find(e => e.id === id);
     if (!ex) return;
     const newDone = !ex.done;
-    // Optimistic
     updateLocal(w => {
       const e = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(x => x.id === id);
       if (e) e.done = newDone;
     });
     try { await toggleExercise(id, newDone); }
-    catch (err) {
-      // Revert
+    catch {
       updateLocal(w => {
         const e = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(x => x.id === id);
         if (e) e.done = !newDone;
@@ -209,7 +292,7 @@ export default function Apex({ user, onSignOut }) {
     });
     setEditId(null);
     try { await updateExercise(id, editVals); }
-    catch (err) { showToast("Error al guardar peso"); }
+    catch { showToast("Error al guardar peso"); }
   };
 
   // ─── Delete exercise
@@ -220,7 +303,7 @@ export default function Apex({ user, onSignOut }) {
     });
     setEditId(null);
     try { await deleteExercise(id); }
-    catch (err) { showToast("Error al eliminar"); }
+    catch { showToast("Error al eliminar"); }
   };
 
   // ─── Save activity (cardio notes)
@@ -230,7 +313,7 @@ export default function Apex({ user, onSignOut }) {
       if (ex) ex.activity = val;
     });
     try { await updateExercise(id, { activity: val }); }
-    catch (err) { showToast("Error al guardar actividad"); }
+    catch { showToast("Error al guardar actividad"); }
   };
 
   // ─── Add new exercise
@@ -239,7 +322,6 @@ export default function Apex({ user, onSignOut }) {
     const day = weekData?.days?.[activeDay];
     if (!day?._dayId) return;
     const position = exercises.length;
-    // Optimistic with temp ID
     const tempId = `temp_${Date.now()}`;
     updateLocal(w => {
       w[currentWeekNum]?.days?.[activeDay]?.exercises?.push({ id: tempId, ...newEx, done: false, position });
@@ -248,13 +330,12 @@ export default function Apex({ user, onSignOut }) {
     setShowAdd(false);
     try {
       const saved = await insertExercise(day._dayId, newEx, position);
-      // Replace temp ID with real ID
       updateLocal(w => {
         const exs = w[currentWeekNum]?.days?.[activeDay]?.exercises;
         const i = exs?.findIndex(e => e.id === tempId);
         if (i !== undefined && i >= 0) exs[i].id = saved.id;
       });
-    } catch (err) {
+    } catch {
       updateLocal(w => {
         const day = w[currentWeekNum]?.days?.[activeDay];
         if (day) day.exercises = day.exercises.filter(e => e.id !== tempId);
@@ -271,7 +352,7 @@ export default function Apex({ user, onSignOut }) {
       w[currentWeekNum]?.days?.[activeDay]?.exercises?.forEach(e => e.done = false);
     });
     try { await resetDayExercises(day._dayId); }
-    catch (err) { showToast("Error al reiniciar día"); }
+    catch { showToast("Error al reiniciar día"); }
   };
 
   // ─── New week
@@ -290,16 +371,18 @@ export default function Apex({ user, onSignOut }) {
     }
   };
 
-  // ─── Toggle schedule A/B
+  // ─── Toggle schedule A/B (with advisory)
   const toggleSchedule = async () => {
     const newSched = schedule === "A" ? "B" : "A";
+    const label = newSched === "A" ? "A · Fuerza (4–8 reps)" : "B · Hipertrofia (8–15 reps)";
     setSchedule(newSched);
+    showToast(`Horario ${label} — aplica a toda la semana`, "info");
     const wk = weekData;
     if (wk?._weekId) {
       try {
         await updateWeekSchedule(wk._weekId, newSched);
         updateLocal(w => { if (w[currentWeekNum]) w[currentWeekNum].schedule = newSched; });
-      } catch (err) { showToast("Error al cambiar horario"); }
+      } catch { showToast("Error al cambiar horario"); }
     }
   };
 
@@ -308,13 +391,12 @@ export default function Apex({ user, onSignOut }) {
     const next = currentWeekNum + dir;
     if (next < 1) return;
     if (!weeks[next] && dir > 0) {
-      // Create it
       setLoading(true);
       try {
         const wd = await createFullWeek(user.id, next, schedule, BASE_DAYS);
         setWeeks(prev => ({ ...prev, [next]: mergeWithTemplate(wd) }));
         setCurrentWeekNum(next);
-      } catch (err) {
+      } catch {
         showToast("Error al crear semana");
       } finally {
         setLoading(false);
@@ -372,6 +454,10 @@ export default function Apex({ user, onSignOut }) {
       --muted: #9E9A94;
       --accent: #1A1917;
       --pill: #ECEAE5;
+      --proto-bg: #1A1917;
+      --proto-text: #F0EDE8;
+      --proto-muted: rgba(240,237,232,0.55);
+      --proto-border: rgba(240,237,232,0.12);
     }
 
     .app {
@@ -386,18 +472,11 @@ export default function Apex({ user, onSignOut }) {
     /* ── LOADING ── */
     .loading-screen {
       min-height: 100dvh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      background: var(--bg);
-      font-family: 'DM Sans', sans-serif;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; background: var(--bg); font-family: 'DM Sans', sans-serif;
     }
     .loading-logo { font-size: 32px; font-weight: 300; letter-spacing: -1px; color: var(--text); }
-    .loading-dot {
-      display: flex; gap: 6px;
-    }
+    .loading-dot { display: flex; gap: 6px; }
     .loading-dot span {
       width: 5px; height: 5px; border-radius: 50%; background: var(--muted);
       animation: pulse 1s infinite;
@@ -408,29 +487,18 @@ export default function Apex({ user, onSignOut }) {
 
     /* ── TOAST ── */
     .toast {
-      position: fixed;
-      bottom: 100px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--text);
-      color: var(--bg);
-      font-size: 12px;
-      font-family: 'DM Mono', monospace;
-      padding: 10px 20px;
-      border-radius: 20px;
-      z-index: 999;
-      animation: fadeIn 0.2s ease;
-      white-space: nowrap;
+      position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
+      background: var(--text); color: var(--bg);
+      font-size: 12px; font-family: 'DM Mono', monospace;
+      padding: 10px 20px; border-radius: 20px;
+      z-index: 999; animation: fadeIn 0.2s ease; white-space: nowrap; max-width: 90vw;
+      text-align: center; word-break: break-word; white-space: normal;
     }
+    .toast.info { background: #27AE60; }
     @keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 
     /* ── TOP BAR ── */
-    .top-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 20px 20px 0;
-    }
+    .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 20px 20px 0; }
     .top-logo { font-size: 22px; font-weight: 300; letter-spacing: -1px; color: var(--text); }
     .top-right { display: flex; align-items: center; gap: 10px; }
     .top-name { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
@@ -441,10 +509,7 @@ export default function Apex({ user, onSignOut }) {
     }
 
     /* ── DAY STRIP ── */
-    .day-strip {
-      display: flex; gap: 6px; padding: 18px 20px 0;
-      overflow-x: auto; scrollbar-width: none;
-    }
+    .day-strip { display: flex; gap: 6px; padding: 18px 20px 0; overflow-x: auto; scrollbar-width: none; }
     .day-strip::-webkit-scrollbar { display: none; }
     .day-btn {
       display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -464,14 +529,12 @@ export default function Apex({ user, onSignOut }) {
     /* ── TRACKER BODY ── */
     .body { padding: 24px 20px 100px; }
 
-    .day-header {
-      display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;
-    }
+    .day-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
     .day-title { font-size: 28px; font-weight: 300; letter-spacing: -0.5px; color: var(--text); }
     .day-meta  { font-size: 12px; color: var(--muted); margin-top: 3px; }
-
     .progress-ring { flex-shrink: 0; }
 
+    /* ── SCHEDULE ROW ── */
     .schedule-row { display: flex; gap: 8px; margin-bottom: 20px; align-items: center; }
     .sched-pill {
       font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted);
@@ -490,6 +553,51 @@ export default function Apex({ user, onSignOut }) {
       cursor: pointer; transition: all 0.15s; font-family: 'DM Sans', sans-serif;
     }
     .ghost-btn:active { border-color: var(--text); color: var(--text); }
+
+    /* ── PROTOCOL CARD ── */
+    .protocol-card {
+      background: var(--proto-bg); border-radius: 16px;
+      padding: 16px 18px; margin-bottom: 20px; overflow: hidden;
+    }
+    .proto-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 0;
+    }
+    .proto-label {
+      font-size: 9px; font-family: 'DM Mono', monospace;
+      color: var(--proto-muted); letter-spacing: 1px; text-transform: uppercase;
+    }
+    .proto-toggle-btn {
+      background: none; border: none; cursor: pointer; padding: 0;
+      font-size: 12px; color: var(--proto-muted); line-height: 1;
+    }
+    .proto-body { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .proto-sets-row {
+      display: flex; gap: 8px;
+    }
+    .proto-badge {
+      background: rgba(240,237,232,0.1); border: 1px solid var(--proto-border);
+      border-radius: 8px; padding: 8px 12px; flex: 1;
+    }
+    .proto-badge-val {
+      font-size: 13px; font-weight: 500; color: var(--proto-text); line-height: 1.2;
+      font-family: 'DM Mono', monospace;
+    }
+    .proto-badge-lbl {
+      font-size: 9px; color: var(--proto-muted); margin-top: 3px; font-family: 'DM Mono', monospace;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .proto-divider {
+      height: 1px; background: var(--proto-border); margin: 2px 0;
+    }
+    .proto-tip {
+      font-size: 11px; color: var(--proto-muted); line-height: 1.6;
+      font-family: 'DM Sans', sans-serif;
+    }
+    .proto-tip strong { color: rgba(240,237,232,0.8); font-weight: 500; }
+    .proto-collapsed { margin-top: 8px; }
+    .proto-collapsed-text {
+      font-size: 11px; font-family: 'DM Mono', monospace; color: var(--proto-muted);
+    }
 
     /* ── EXERCISE LIST ── */
     .ex-list { display: flex; flex-direction: column; }
@@ -510,13 +618,31 @@ export default function Apex({ user, onSignOut }) {
     .ex-name.done { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--border); }
     .ex-muscle { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: 'DM Mono', monospace; }
 
-    .ex-chips { display: flex; gap: 6px; margin-top: 10px; }
+    .ex-chips { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
     .chip {
       font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted);
       background: var(--pill); border-radius: 6px; padding: 4px 8px; cursor: pointer;
     }
     .chip.editing { background: var(--text); color: var(--bg); }
-    .chip input {
+
+    /* Weight input with fixed "kg" */
+    .weight-chip-edit {
+      display: flex; align-items: center; gap: 4px;
+      background: var(--text); border-radius: 6px; padding: 4px 8px;
+    }
+    .weight-chip-edit input {
+      background: transparent; border: none; outline: none; color: var(--bg);
+      font-family: 'DM Mono', monospace; font-size: 11px; width: 50px;
+      -moz-appearance: textfield;
+    }
+    .weight-chip-edit input::-webkit-outer-spin-button,
+    .weight-chip-edit input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .weight-kg-label { font-size: 11px; font-family: 'DM Mono', monospace; color: rgba(240,237,232,0.55); }
+
+    .reps-chip-edit {
+      background: var(--text); border-radius: 6px; padding: 4px 8px;
+    }
+    .reps-chip-edit input {
       background: transparent; border: none; outline: none; color: var(--bg);
       font-family: 'DM Mono', monospace; font-size: 11px; width: 70px;
     }
@@ -641,14 +767,9 @@ export default function Apex({ user, onSignOut }) {
       border-top: 1px solid var(--border);
       display: flex; padding: 12px 0 24px; z-index: 100;
     }
-    .nav-item {
-      flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer;
-    }
+    .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
     .nav-icon { font-size: 18px; }
-    .nav-lbl {
-      font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace;
-      letter-spacing: 0.5px; transition: color 0.15s;
-    }
+    .nav-lbl { font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace; letter-spacing: 0.5px; transition: color 0.15s; }
     .nav-item.active .nav-lbl { color: var(--text); }
     .nav-dot { width: 4px; height: 4px; border-radius: 50%; background: transparent; margin-top: 2px; }
     .nav-item.active .nav-dot { background: var(--text); }
@@ -680,11 +801,80 @@ export default function Apex({ user, onSignOut }) {
     );
   }
 
-  // ─── RENDER HELPERS ───────────────────────────────────────────────────────
+  // ─── PROTOCOL CARD COMPONENT ──────────────────────────────────────────────
+  const renderProtocolCard = () => {
+    const proto = DAY_PROTOCOL[activeDay];
+    if (!proto) return null;
+    const isResistance = RESISTANCE_DAYS.includes(activeDay);
+    const sched = weekData?.schedule || schedule;
+    const schedNote = isResistance && proto.scheduleNote ? proto.scheduleNote(sched) : null;
 
+    if (!protocolOpen) {
+      return (
+        <div className="protocol-card">
+          <div className="proto-header">
+            <span className="proto-label">Protocolo Huberman</span>
+            <button className="proto-toggle-btn" onClick={() => setProtocolOpen(true)}>+</button>
+          </div>
+          <div className="proto-collapsed">
+            <span className="proto-collapsed-text">
+              {schedNote ? `${schedNote.sets} · ${schedNote.rest}` : proto.tip1?.slice(0, 50) + "…"}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="protocol-card">
+        <div className="proto-header">
+          <span className="proto-label">Protocolo Huberman</span>
+          <button className="proto-toggle-btn" onClick={() => setProtocolOpen(false)}>−</button>
+        </div>
+        <div className="proto-body">
+          {schedNote && (
+            <div className="proto-sets-row">
+              <div className="proto-badge">
+                <div className="proto-badge-val">{schedNote.sets}</div>
+                <div className="proto-badge-lbl">Horario {sched}</div>
+              </div>
+              <div className="proto-badge">
+                <div className="proto-badge-val">{schedNote.rest}</div>
+                <div className="proto-badge-lbl">Descanso</div>
+              </div>
+            </div>
+          )}
+          <div className="proto-divider" />
+          {proto.tip1 && (
+            <p className="proto-tip">
+              <strong>↑</strong> {proto.tip1}
+            </p>
+          )}
+          {proto.tip2 && (
+            <p className="proto-tip">
+              <strong>↑</strong> {proto.tip2}
+            </p>
+          )}
+          {proto.breath && (
+            <p className="proto-tip">
+              <strong>Respiración —</strong> {proto.breath}
+            </p>
+          )}
+          {proto.warmup && (
+            <p className="proto-tip">
+              <strong>Calentamiento —</strong> {proto.warmup}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ─── RENDER EXERCISE ROW ──────────────────────────────────────────────────
   const renderExRow = (ex) => {
     const isEditing = editId === ex.id;
-    const isCardio  = dayData?.isCardio;
+    const isCardioDay = dayData?.isCardio;
+    const isFixedWeight = ex.weight === "—"; // abs exercises with fixed weight marker
 
     return (
       <div key={ex.id} className="ex-row" onClick={() => !isEditing && toggle(ex.id)}>
@@ -698,7 +888,7 @@ export default function Apex({ user, onSignOut }) {
           <div className={`ex-name ${ex.done ? "done" : ""}`} onClick={() => toggle(ex.id)}>{ex.name}</div>
           <div className="ex-muscle">{ex.muscle}</div>
 
-          {isCardio ? (
+          {isCardioDay ? (
             <input className="activity-input"
               placeholder="¿Qué hiciste? ej: trote 35 min, bici 16 km…"
               defaultValue={ex.activity || ""}
@@ -707,19 +897,30 @@ export default function Apex({ user, onSignOut }) {
           ) : isEditing ? (
             <>
               <div className="ex-chips">
-                <div className="chip editing">
-                  <input autoFocus
-                    value={editVals.weight ?? ex.weight}
-                    onChange={e => setEditVals(v => ({ ...v, weight: e.target.value }))}
-                    placeholder="peso"
-                  />
-                </div>
-                <div className="chip editing">
+                {/* Weight input: number only, "kg" fixed — unless it's a bodyweight/marker exercise */}
+                {isFixedWeight ? (
+                  <div className="chip editing" style={{ opacity: 0.5, cursor: "default" }}>— kg</div>
+                ) : (
+                  <div className="weight-chip-edit">
+                    <input
+                      autoFocus
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={editVals.weight ?? ex.weight}
+                      onChange={e => setEditVals(v => ({ ...v, weight: e.target.value }))}
+                      placeholder="0"
+                    />
+                    <span className="weight-kg-label">kg</span>
+                  </div>
+                )}
+                {/* Reps input: editable text */}
+                <div className="reps-chip-edit">
                   <input
+                    type="text"
                     value={editVals.reps ?? ex.reps}
                     onChange={e => setEditVals(v => ({ ...v, reps: e.target.value }))}
-                    placeholder="series×reps"
-                    style={{ width: 90 }}
+                    placeholder="sets×reps"
                   />
                 </div>
               </div>
@@ -732,7 +933,9 @@ export default function Apex({ user, onSignOut }) {
           ) : (
             <div className="ex-chips"
               onClick={() => { setEditId(ex.id); setEditVals({ weight: ex.weight, reps: ex.reps }); }}>
-              <div className="chip">{ex.weight || "— kg"}</div>
+              <div className="chip">
+                {isFixedWeight ? "— kg" : (ex.weight ? `${ex.weight} kg` : "— kg")}
+              </div>
               <div className="chip">{ex.reps || "—"}</div>
             </div>
           )}
@@ -741,6 +944,7 @@ export default function Apex({ user, onSignOut }) {
     );
   };
 
+  // ─── RENDER TRACKER ───────────────────────────────────────────────────────
   const renderTracker = () => {
     const ringR   = 26;
     const ringC   = 2 * Math.PI * ringR;
@@ -788,11 +992,19 @@ export default function Apex({ user, onSignOut }) {
             </svg>
           </div>
 
+          {/* Schedule A/B — informative with week-wide advisory */}
           <div className="schedule-row">
-            <button className={`sched-pill ${schedule === "A" ? "active" : ""}`} onClick={toggleSchedule}>A · fuerza</button>
-            <button className={`sched-pill ${schedule === "B" ? "active" : ""}`} onClick={toggleSchedule}>B · hipertrofia</button>
+            <button className={`sched-pill ${schedule === "A" ? "active" : ""}`} onClick={toggleSchedule}>
+              A · fuerza
+            </button>
+            <button className={`sched-pill ${schedule === "B" ? "active" : ""}`} onClick={toggleSchedule}>
+              B · hipertrofia
+            </button>
             {dayData?.warmup && <span className="warmup-tag">calentamiento 10 min</span>}
           </div>
+
+          {/* Protocol context card */}
+          {renderProtocolCard()}
 
           <div className="action-row">
             <button className="ghost-btn" onClick={() => setShowAdd(s => !s)}>+ agregar</button>
@@ -811,8 +1023,8 @@ export default function Apex({ user, onSignOut }) {
                   value={newEx.activity} onChange={e => setNewEx(v => ({ ...v, activity: e.target.value }))} />
               ) : (
                 <div className="add-row">
-                  <input className="add-input" placeholder="Peso" value={newEx.weight}
-                    onChange={e => setNewEx(v => ({ ...v, weight: e.target.value }))} />
+                  <input className="add-input" placeholder="Peso (número)" type="number" min="0" step="0.5"
+                    value={newEx.weight} onChange={e => setNewEx(v => ({ ...v, weight: e.target.value }))} />
                   <input className="add-input" placeholder="Series×Reps" value={newEx.reps}
                     onChange={e => setNewEx(v => ({ ...v, reps: e.target.value }))} />
                 </div>
@@ -831,6 +1043,7 @@ export default function Apex({ user, onSignOut }) {
     );
   };
 
+  // ─── RENDER WEEK ──────────────────────────────────────────────────────────
   const renderWeek = () => (
     <>
       <div className="top-bar">
@@ -892,6 +1105,7 @@ export default function Apex({ user, onSignOut }) {
     </>
   );
 
+  // ─── RENDER PROGRESS ──────────────────────────────────────────────────────
   const renderProgress = () => {
     const W = 320, H = 110, pad = { l: 24, r: 8, t: 12, b: 8 };
     const hasData = chartData.length > 1;
@@ -1002,7 +1216,7 @@ export default function Apex({ user, onSignOut }) {
   return (
     <>
       <style>{css}</style>
-      {toast && <div className="toast">{toast.msg}</div>}
+      {toast && <div className={`toast ${toast.type === "info" ? "info" : ""}`}>{toast.msg}</div>}
       <div className="app">
         {screen === "tracker"  ? renderTracker()  :
          screen === "week"     ? renderWeek()     :
