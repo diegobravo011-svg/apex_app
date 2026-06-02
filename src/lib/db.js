@@ -156,10 +156,19 @@ export async function loadAllData(userId) {
 
     for (const day of daysRaw) {
       const exsRaw = await getExercisesForDay(day.id)
+
+      // Deduplicate: keep only the first occurrence of each exercise name
+      const seen = new Set()
+      const unique = exsRaw.filter(e => {
+        if (seen.has(e.name)) return false
+        seen.add(e.name)
+        return true
+      })
+
       days[day.day_key] = {
         _dayId: day.id,
         completed_warmup: day.completed_warmup,
-        exercises: exsRaw.map(e => ({
+        exercises: unique.map(e => ({
           id: e.id,
           name: e.name,
           muscle: e.muscle,
@@ -196,6 +205,10 @@ export async function createFullWeek(userId, weekNumber, schedule, template) {
   for (const dayKey of DAY_ORDER) {
     const tmpl = template[dayKey]
     const day = await upsertDay(week.id, dayKey)
+
+    // Clear any existing exercises for this day before inserting
+    // (prevents duplicates if createFullWeek is called multiple times)
+    await supabase.from('exercises').delete().eq('day_id', day.id)
 
     const exercises = []
     for (let i = 0; i < tmpl.exercises.length; i++) {
