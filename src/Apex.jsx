@@ -299,6 +299,13 @@ const loadCreatine = () => {
   try { return JSON.parse(localStorage.getItem("apex_creatine") || "{}"); } catch { return {}; }
 };
 
+// ─── Bilateral flag: stored in localStorage keyed by exercise name ("apex_bilateral")
+// { "Lateral Raise": true, "Incline Curl": true, … }
+const loadBilateral = () => {
+  try { return JSON.parse(localStorage.getItem("apex_bilateral") || "{}"); } catch { return {}; }
+};
+const saveBilateral = (map) => localStorage.setItem("apex_bilateral", JSON.stringify(map));
+
 export default function Apex({ user, onSignOut }) {
   const [screen, setScreen]       = useState("tracker");
   const [activeDay, setActiveDay] = useState(DAY_ORDER[TODAY_IDX]);
@@ -310,7 +317,9 @@ export default function Apex({ user, onSignOut }) {
   const [toast, setToast]         = useState(null);
   const [protocolOpen, setProtocolOpen] = useState(true);
   // creatine: { "2026-06-03": true, … }
-  const [creatine, setCreatine]   = useState(loadCreatine);
+  const [creatine, setCreatine]     = useState(loadCreatine);
+  // bilateral: { "Lateral Raise": true, … } — stored in localStorage, keyed by exercise name
+  const [bilateralMap, setBilateralMap] = useState(loadBilateral);
 
   // ─── Remote state
   const [weeks, setWeeks]             = useState({});
@@ -390,15 +399,30 @@ export default function Apex({ user, onSignOut }) {
     }
   };
 
-  // ─── Save edit (weight/reps)
+  // ─── Save edit (weight/reps/bilateral)
   const saveEdit = async (id) => {
+    // Persist bilateral flag in localStorage by exercise name
+    const ex = exercises.find(e => e.id === id);
+    if (ex && editVals.bilateral !== undefined) {
+      setBilateralMap(prev => {
+        const next = { ...prev, [ex.name]: !!editVals.bilateral };
+        saveBilateral(next);
+        return next;
+      });
+    }
+    // Only send weight & reps to DB (bilateral lives in localStorage)
+    const dbFields = {};
+    if (editVals.weight !== undefined) dbFields.weight = editVals.weight;
+    if (editVals.reps   !== undefined) dbFields.reps   = editVals.reps;
     updateLocal(w => {
       const ex = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(e => e.id === id);
-      if (ex) Object.assign(ex, editVals);
+      if (ex) Object.assign(ex, dbFields);
     });
     setEditId(null);
-    try { await updateExercise(id, editVals); }
-    catch { showToast("Error al guardar peso"); }
+    if (Object.keys(dbFields).length) {
+      try { await updateExercise(id, dbFields); }
+      catch { showToast("Error al guardar"); }
+    }
   };
 
   // ─── Delete exercise
@@ -563,10 +587,14 @@ export default function Apex({ user, onSignOut }) {
     return exs.reduce((sum, ex) => {
       const w = parseFloat(ex.weight);
       if (!w || isNaN(w) || ex.weight === '—') return sum;
-      const repsStr = getTemplateReps(dayKey, ex.name) || ex.reps || '';
+      // Prefer user-saved reps over template (they may have customized due to failure)
+      const tmplReps = getTemplateReps(dayKey, ex.name);
+      const repsStr = ex.reps || tmplReps || '';
       const parsed = parseRepsString(repsStr);
       if (!parsed) return sum;
-      return sum + w * parsed.sets * parsed.reps;
+      // Bilateral dumbbell exercises: multiply by 2 for accurate total mechanical work
+      const mult = bilateralMap[ex.name] ? 2 : 1;
+      return sum + w * parsed.sets * parsed.reps * mult;
     }, 0);
   };
 
@@ -804,6 +832,8 @@ export default function Apex({ user, onSignOut }) {
       background: var(--pill); border-radius: 6px; padding: 4px 8px; cursor: pointer;
     }
     .chip.editing { background: var(--text); color: var(--bg); }
+    /* chip with user-overridden value */
+    .chip-custom { border: 1px solid var(--text); }
 
     /* Weight input with fixed "kg" */
     .weight-chip-edit {
@@ -1154,16 +1184,29 @@ export default function Apex({ user, onSignOut }) {
                     <span className="weight-kg-label">kg</span>
                   </div>
                 )}
-                {/* Reps input: editable text */}
+                {/* Reps input: editable text — pre-fill with saved value, hint shows template */}
                 <div className="reps-chip-edit">
                   <input
                     type="text"
                     value={editVals.reps ?? ex.reps}
                     onChange={e => setEditVals(v => ({ ...v, reps: e.target.value }))}
-                    placeholder="sets×reps"
+                    placeholder={getTemplateReps(activeDay, ex.name) || "sets×reps"}
                   />
                 </div>
               </div>
+              {/* Bilateral toggle for dumbbell exercises */}
+              {!isCardioDay && !isFixedWeight && (
+                <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button
+                    className={`chip ${(editVals.bilateral ?? bilateralMap[ex.name]) ? 'editing' : ''}`}
+                    style={{ cursor: 'pointer', fontSize: 10 }}
+                    onClick={e => { e.stopPropagation(); setEditVals(v => ({ ...v, bilateral: !(v.bilateral ?? bilateralMap[ex.name]) })); }}
+                  >
+                    {(editVals.bilateral ?? bilateralMap[ex.name]) ? '×2 bilateral ✓' : '×2 bilateral (mancuernas)'}
+                  </button>
+                  <span style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'DM Mono' }}>para VTL correcto</span>
+                </div>
+              )}
               <div className="edit-actions">
                 <button className="save-btn"   onClick={() => saveEdit(ex.id)}>Guardar</button>
                 <button className="cancel-btn" onClick={() => setEditId(null)}>Cancelar</button>
@@ -1172,14 +1215,24 @@ export default function Apex({ user, onSignOut }) {
             </>
           ) : (
             <div className="ex-chips"
-              onClick={() => { setEditId(ex.id); setEditVals({ weight: ex.weight, reps: ex.reps }); }}>
+              onClick={() => { setEditId(ex.id); setEditVals({ weight: ex.weight, reps: ex.reps, bilateral: bilateralMap[ex.name] ?? false }); }}>
               <div className="chip">
                 {isFixedWeight ? "— kg" : (ex.weight ? `${ex.weight} kg` : "— kg")}
+                {bilateralMap[ex.name] && <span style={{ marginLeft: 3, fontSize: 9, opacity: 0.65 }}>×2</span>}
               </div>
-              <div className="chip">
-                {/* Show template reps for the active schedule on resistance days */}
-                {getTemplateReps(activeDay, ex.name) || ex.reps || "—"}
-              </div>
+              {(() => {
+                const tmplReps = getTemplateReps(activeDay, ex.name);
+                const savedReps = ex.reps;
+                // If user has saved a custom value that differs from template, show it with marker
+                const isCustom = savedReps && tmplReps && savedReps !== tmplReps;
+                const display = savedReps || tmplReps || "—";
+                return (
+                  <div className={`chip ${isCustom ? 'chip-custom' : ''}`}>
+                    {display}
+                    {isCustom && <span style={{ marginLeft: 3, fontSize: 8, opacity: 0.6 }}>✎</span>}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
