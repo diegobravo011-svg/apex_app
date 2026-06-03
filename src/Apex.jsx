@@ -549,6 +549,34 @@ export default function Apex({ user, onSignOut }) {
     return tmpl?.reps || null;
   };
 
+  // ─── Volumen total levantado (VTL = kg × sets × reps) ───────────────────────────
+  // Parses "4×6" or "3x12" from reps string
+  const parseRepsString = (str) => {
+    if (!str) return null;
+    const m = str.match(/(\d+)[\u00d7xX](\d+)/);
+    if (!m) return null;
+    return { sets: parseInt(m[1]), reps: parseInt(m[2]) };
+  };
+
+  const calcDayVolume = (dayKey) => {
+    const exs = weekData?.days?.[dayKey]?.exercises || [];
+    return exs.reduce((sum, ex) => {
+      const w = parseFloat(ex.weight);
+      if (!w || isNaN(w) || ex.weight === '—') return sum;
+      const repsStr = getTemplateReps(dayKey, ex.name) || ex.reps || '';
+      const parsed = parseRepsString(repsStr);
+      if (!parsed) return sum;
+      return sum + w * parsed.sets * parsed.reps;
+    }, 0);
+  };
+
+  const weeklyVolume = RESISTANCE_DAYS.reduce((acc, d) => acc + calcDayVolume(d), 0);
+  const fmtVolume = (kg) => {
+    if (kg === 0) return '0';
+    if (kg >= 1000) return `${(kg / 1000).toFixed(1).replace('.', ',')} t`;
+    return `${Math.round(kg).toLocaleString('es-ES')} kg`;
+  };
+
   // ─── Chart data
   const getChartData = (exName) => {
     const points = [];
@@ -885,13 +913,31 @@ export default function Apex({ user, onSignOut }) {
     .week-body { padding: 24px 20px 100px; }
     .section-title { font-size: 22px; font-weight: 300; letter-spacing: -0.5px; margin-bottom: 20px; color: var(--text); }
 
-    .stats-row { display: flex; gap: 10px; margin-bottom: 24px; }
+    .stats-row { display: flex; gap: 10px; margin-bottom: 12px; }
     .stat-card {
       flex: 1; background: var(--surface); border: 1px solid var(--border);
       border-radius: 14px; padding: 16px 14px; text-align: center;
     }
     .stat-num { font-size: 32px; font-weight: 300; letter-spacing: -1px; color: var(--text); line-height: 1; }
     .stat-lbl { font-size: 10px; color: var(--muted); margin-top: 4px; font-family: 'DM Mono', monospace; }
+
+    /* VTL card */
+    .vtl-card {
+      background: var(--text); border-radius: 14px; padding: 18px 20px;
+      margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .vtl-left {}
+    .vtl-label { font-size: 9px; font-family: 'DM Mono', monospace; color: rgba(240,237,232,0.5);
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .vtl-value { font-size: 36px; font-weight: 300; letter-spacing: -1.5px; color: #F0EDE8; line-height: 1; }
+    .vtl-sub { font-size: 10px; color: rgba(240,237,232,0.45); font-family: 'DM Mono', monospace; margin-top: 4px; }
+    .vtl-breakdown { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+    .vtl-day-row { display: flex; gap: 8px; align-items: center; }
+    .vtl-day-name { font-size: 9px; color: rgba(240,237,232,0.4); font-family: 'DM Mono', monospace;
+      text-transform: uppercase; width: 26px; text-align: right; }
+    .vtl-day-bar-bg { width: 60px; height: 3px; background: rgba(240,237,232,0.12); border-radius: 2px; }
+    .vtl-day-bar-fill { height: 100%; background: rgba(240,237,232,0.55); border-radius: 2px; transition: width 0.4s; }
+    .vtl-day-kg { font-size: 9px; color: rgba(240,237,232,0.55); font-family: 'DM Mono', monospace; width: 40px; }
 
     .day-card {
       background: var(--surface); border: 1px solid var(--border);
@@ -1295,6 +1341,36 @@ export default function Apex({ user, onSignOut }) {
             <div className="stat-lbl">restantes</div>
           </div>
         </div>
+
+        {/* ── VTL CARD ── */}
+        {(() => {
+          const dayVols = RESISTANCE_DAYS.map(d => ({ d, vol: calcDayVolume(d) }));
+          const maxVol = Math.max(...dayVols.map(x => x.vol), 1);
+          const labels = { lun: 'Lun', mie: 'Mié', sab: 'Sáb' };
+          return (
+            <div className="vtl-card">
+              <div className="vtl-left">
+                <div className="vtl-label">Volumen semanal</div>
+                <div className="vtl-value">{fmtVolume(weeklyVolume)}</div>
+                <div className="vtl-sub">
+                  {weeklyVolume === 0 ? 'agrega pesos para calcular' : 'kg totales levantados · fuerza'}
+                </div>
+              </div>
+              <div className="vtl-breakdown">
+                {dayVols.map(({ d, vol }) => (
+                  <div key={d} className="vtl-day-row">
+                    <span className="vtl-day-name">{labels[d]}</span>
+                    <div className="vtl-day-bar-bg">
+                      <div className="vtl-day-bar-fill"
+                        style={{ width: maxVol > 0 ? `${(vol / maxVol) * 100}%` : '0%' }} />
+                    </div>
+                    <span className="vtl-day-kg">{vol > 0 ? fmtVolume(vol) : '—'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {DAY_ORDER.map(d => {
           const dd  = weekData?.days?.[d];
