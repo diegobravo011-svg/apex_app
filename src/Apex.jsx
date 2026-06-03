@@ -163,7 +163,9 @@ const BASE_DAYS = {
 
 const RESISTANCE_DAYS = ["lun", "mie", "sab"];
 const DAY_ORDER = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"];
-const TODAY_IDX = Math.min(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1, 6);
+// Use local date to determine today's index (0=Mon … 6=Sun)
+const _localDay = new Date().getDay(); // 0=Sun,1=Mon,…,6=Sat
+const TODAY_IDX = _localDay === 0 ? 6 : _localDay - 1;
 
 // ─── GET EXERCISES BY SCHEDULE ────────────────────────────────────────────────
 const getExercisesForDay = (dayKey, scheduleStr) => {
@@ -195,6 +197,11 @@ const mergeWithTemplate = (weekData) => {
 };
 
 // ─── COMPONENT ───────────────────────────────────────────────────────────────
+// ─── Creatine tracking: stored in localStorage keyed by "apex_creatine"
+const loadCreatine = () => {
+  try { return JSON.parse(localStorage.getItem("apex_creatine") || "{}"); } catch { return {}; }
+};
+
 export default function Apex({ user, onSignOut }) {
   const [screen, setScreen]       = useState("tracker");
   const [activeDay, setActiveDay] = useState(DAY_ORDER[TODAY_IDX]);
@@ -205,6 +212,8 @@ export default function Apex({ user, onSignOut }) {
   const [chartEx, setChartEx]     = useState("Squat");
   const [toast, setToast]         = useState(null);
   const [protocolOpen, setProtocolOpen] = useState(true);
+  // creatine: { "2026-06-03": true, … }
+  const [creatine, setCreatine]   = useState(loadCreatine);
 
   // ─── Remote state
   const [weeks, setWeeks]             = useState({});
@@ -412,6 +421,37 @@ export default function Apex({ user, onSignOut }) {
     return Math.round(exs.filter(e => e.done).length / exs.length * 100);
   };
 
+  // ─── Creatine helpers
+  // Get today's local date key "YYYY-MM-DD"
+  const getTodayKey = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  // Get the date key for a day in the current week (relative to today)
+  const getDayKey = (dayIdx) => {
+    const todayLocal = new Date();
+    const todayDayIdx = todayLocal.getDay() === 0 ? 6 : todayLocal.getDay() - 1;
+    const diff = dayIdx - todayDayIdx;
+    const d = new Date(todayLocal);
+    d.setDate(d.getDate() + diff);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  const toggleCreatine = (dayIdx) => {
+    const key = getDayKey(dayIdx);
+    setCreatine(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      localStorage.setItem("apex_creatine", JSON.stringify(next));
+      return next;
+    });
+  };
+  // Get the reps for an exercise using the current schedule template
+  const getTemplateReps = (dayKey, exName) => {
+    if (!RESISTANCE_DAYS.includes(dayKey)) return null;
+    const pool = (weekData?.schedule || schedule) === "A" ? EXERCISES_A : EXERCISES_B;
+    const tmpl = (pool[dayKey] || []).find(e => e.name === exName);
+    return tmpl?.reps || null;
+  };
+
   // ─── Chart data
   const getChartData = (exName) => {
     const points = [];
@@ -512,10 +552,10 @@ export default function Apex({ user, onSignOut }) {
     .day-strip { display: flex; gap: 6px; padding: 18px 20px 0; overflow-x: auto; scrollbar-width: none; }
     .day-strip::-webkit-scrollbar { display: none; }
     .day-btn {
-      display: flex; flex-direction: column; align-items: center; gap: 6px;
-      padding: 10px 0; width: 44px; border-radius: 22px;
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 8px 0 6px; width: 44px; border-radius: 22px;
       border: 1px solid transparent; background: transparent;
-      cursor: pointer; flex-shrink: 0; transition: all 0.15s;
+      cursor: pointer; flex-shrink: 0; transition: all 0.15s; position: relative;
     }
     .day-btn.active { background: var(--text); border-color: var(--text); }
     .day-lbl { font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: 0.5px; font-family: 'DM Mono', monospace; }
@@ -525,6 +565,21 @@ export default function Apex({ user, onSignOut }) {
     .day-btn.active .day-pip { background: rgba(240,237,232,0.4); }
     .day-btn.active .day-pip.full { background: #F0EDE8; }
     .day-pip.partial { background: var(--muted); opacity: 0.4; }
+    /* creatine mini checkbox */
+    .day-creatine {
+      width: 14px; height: 14px; border-radius: 4px;
+      border: 1.5px solid var(--border); background: transparent;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s; flex-shrink: 0;
+    }
+    .day-creatine.checked { background: #4CAF50; border-color: #4CAF50; }
+    .day-btn.active .day-creatine { border-color: rgba(240,237,232,0.35); }
+    .day-btn.active .day-creatine.checked { background: #4CAF50; border-color: #4CAF50; }
+    .day-creatine-mark { font-size: 8px; color: white; line-height: 1; }
+    .day-date-num { font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace; line-height: 1; }
+    .day-btn.active .day-date-num { color: rgba(240,237,232,0.6); }
+    .day-btn.today-btn .day-lbl { color: var(--text); }
+    .day-btn.today-btn:not(.active) .day-lbl { text-decoration: underline; text-underline-offset: 2px; }
 
     /* ── TRACKER BODY ── */
     .body { padding: 24px 20px 100px; }
@@ -936,7 +991,10 @@ export default function Apex({ user, onSignOut }) {
               <div className="chip">
                 {isFixedWeight ? "— kg" : (ex.weight ? `${ex.weight} kg` : "— kg")}
               </div>
-              <div className="chip">{ex.reps || "—"}</div>
+              <div className="chip">
+                {/* Show template reps for the active schedule on resistance days */}
+                {getTemplateReps(activeDay, ex.name) || ex.reps || "—"}
+              </div>
             </div>
           )}
         </div>
@@ -961,13 +1019,27 @@ export default function Apex({ user, onSignOut }) {
         </div>
 
         <div className="day-strip">
-          {DAY_ORDER.map(d => {
+          {DAY_ORDER.map((d, idx) => {
             const p = getProgress(d);
+            const dayKey = getDayKey(idx);
+            const creatineTaken = !!creatine[dayKey];
+            const isToday = idx === TODAY_IDX;
+            // Get day-of-month number from the dayKey (YYYY-MM-DD)
+            const dayNum = parseInt(dayKey.split('-')[2], 10);
             return (
-              <button key={d} className={`day-btn ${activeDay === d ? "active" : ""}`}
+              <button key={d}
+                className={`day-btn ${activeDay === d ? "active" : ""} ${isToday ? "today-btn" : ""}`}
                 onClick={() => { setActiveDay(d); setEditId(null); setShowAdd(false); }}>
                 <span className="day-lbl">{d.toUpperCase()}</span>
+                <span className="day-date-num">{dayNum}</span>
                 <div className={`day-pip ${p === 100 ? "full" : p > 0 ? "partial" : ""}`} />
+                <div
+                  className={`day-creatine ${creatineTaken ? "checked" : ""}`}
+                  title={creatineTaken ? "Creatina ✓" : "Marcar creatina"}
+                  onClick={e => { e.stopPropagation(); toggleCreatine(idx); }}
+                >
+                  {creatineTaken && <span className="day-creatine-mark">✓</span>}
+                </div>
               </button>
             );
           })}
