@@ -196,6 +196,103 @@ const mergeWithTemplate = (weekData) => {
   return merged;
 };
 
+// ─── CARDIO DATA FORM ─────────────────────────────────────────────────────────
+// Serializes cardio metrics to/from the activity string field as JSON
+function parseCardioData(raw) {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null) return parsed;
+  } catch {}
+  // Legacy: plain text string
+  return { notes: raw };
+}
+
+function serializeCardioData(data) {
+  const clean = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== "" && v !== null && v !== undefined));
+  return Object.keys(clean).length ? JSON.stringify(clean) : "";
+}
+
+function CardioDataForm({ ex, onSave }) {
+  const initial = parseCardioData(ex.activity);
+  const [vals, setVals] = useState({
+    duration: initial.duration || "",
+    distance: initial.distance || "",
+    hr_avg:   initial.hr_avg   || "",
+    hr_max:   initial.hr_max   || "",
+    calories: initial.calories || "",
+    zone:     initial.zone     || "",
+    notes:    initial.notes    || "",
+  });
+
+  const set = (k, v) => setVals(prev => ({ ...prev, [k]: v }));
+
+  const handleBlur = () => {
+    onSave(serializeCardioData(vals));
+  };
+
+  const hasData = Object.values(vals).some(v => v !== "");
+
+  return (
+    <div className="cardio-form" onClick={e => e.stopPropagation()}>
+      <div className="cardio-metrics">
+        <div className="cardio-field">
+          <label>Duración</label>
+          <input type="text" placeholder="ej: 35:22" value={vals.duration}
+            onChange={e => set("duration", e.target.value)} onBlur={handleBlur} />
+        </div>
+        <div className="cardio-field">
+          <label>Distancia (km)</label>
+          <input type="text" placeholder="ej: 5.2" value={vals.distance}
+            onChange={e => set("distance", e.target.value)} onBlur={handleBlur} />
+        </div>
+        <div className="cardio-field">
+          <label>FC promedio (bpm)</label>
+          <input type="number" placeholder="ej: 142" value={vals.hr_avg}
+            onChange={e => set("hr_avg", e.target.value)} onBlur={handleBlur} />
+        </div>
+        <div className="cardio-field">
+          <label>FC máx (bpm)</label>
+          <input type="number" placeholder="ej: 168" value={vals.hr_max}
+            onChange={e => set("hr_max", e.target.value)} onBlur={handleBlur} />
+        </div>
+        <div className="cardio-field">
+          <label>Calorías</label>
+          <input type="number" placeholder="ej: 310" value={vals.calories}
+            onChange={e => set("calories", e.target.value)} onBlur={handleBlur} />
+        </div>
+        <div className="cardio-field">
+          <label>Zona principal</label>
+          <select value={vals.zone} onChange={e => { set("zone", e.target.value); }} onBlur={handleBlur}>
+            <option value="">— elegir —</option>
+            <option value="Zona 1">Zona 1 · recuperación</option>
+            <option value="Zona 2">Zona 2 · aeróbico base</option>
+            <option value="Zona 3">Zona 3 · umbral</option>
+            <option value="Zona 4">Zona 4 · alta intensidad</option>
+            <option value="HIIT">HIIT · sprints</option>
+          </select>
+        </div>
+      </div>
+      <textarea className="cardio-note"
+        placeholder="Notas: tipo de actividad, sensaciones, clima…"
+        value={vals.notes}
+        onChange={e => set("notes", e.target.value)}
+        onBlur={handleBlur}
+        rows={2}
+      />
+      {hasData && (
+        <div className="cardio-summary">
+          {vals.duration  && <span className={`cardio-chip filled`}>⏱ {vals.duration}</span>}
+          {vals.distance  && <span className={`cardio-chip filled`}>📍 {vals.distance} km</span>}
+          {vals.hr_avg    && <span className={`cardio-chip filled`}>❤️ {vals.hr_avg} bpm</span>}
+          {vals.calories  && <span className={`cardio-chip filled`}>🔥 {vals.calories} kcal</span>}
+          {vals.zone      && <span className={`cardio-chip filled`}>{vals.zone}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── COMPONENT ───────────────────────────────────────────────────────────────
 // ─── Creatine tracking: stored in localStorage keyed by "apex_creatine"
 const loadCreatine = () => {
@@ -709,6 +806,49 @@ export default function Apex({ user, onSignOut }) {
     }
     .activity-input::placeholder { color: var(--muted); }
 
+    /* ── CARDIO DATA FORM ── */
+    .cardio-form {
+      margin-top: 10px; background: var(--pill);
+      border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .cardio-metrics {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .cardio-field {
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .cardio-field label {
+      font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .cardio-field input, .cardio-field select {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 10px; font-size: 12px;
+      color: var(--text); font-family: 'DM Mono', monospace; outline: none;
+      width: 100%; transition: border-color 0.15s;
+    }
+    .cardio-field input:focus, .cardio-field select:focus { border-color: var(--text); }
+    .cardio-field input::placeholder { color: var(--muted); }
+    .cardio-note {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px; font-size: 12px;
+      color: var(--text); font-family: 'DM Sans', sans-serif; outline: none;
+      width: 100%; resize: none; min-height: 48px; transition: border-color 0.15s;
+    }
+    .cardio-note:focus { border-color: var(--text); }
+    .cardio-note::placeholder { color: var(--muted); }
+    .cardio-summary {
+      margin-top: 8px; padding: 8px 10px;
+      background: var(--pill); border-radius: 8px;
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .cardio-chip {
+      font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted);
+      background: var(--surface); border-radius: 6px; padding: 3px 8px;
+      border: 1px solid var(--border);
+    }
+    .cardio-chip.filled { color: var(--text); border-color: var(--text); }
+
     .edit-actions { display: flex; gap: 6px; margin-top: 10px; }
     .save-btn {
       font-size: 11px; background: var(--text); color: var(--bg);
@@ -944,10 +1084,9 @@ export default function Apex({ user, onSignOut }) {
           <div className="ex-muscle">{ex.muscle}</div>
 
           {isCardioDay ? (
-            <input className="activity-input"
-              placeholder="¿Qué hiciste? ej: trote 35 min, bici 16 km…"
-              defaultValue={ex.activity || ""}
-              onBlur={e => saveActivity(ex.id, e.target.value)}
+            <CardioDataForm
+              ex={ex}
+              onSave={(data) => saveActivity(ex.id, data)}
             />
           ) : isEditing ? (
             <>
@@ -1051,7 +1190,14 @@ export default function Apex({ user, onSignOut }) {
               <div className="day-title">{dayData?.name}</div>
               <div className="day-meta">
                 {dayData?.label} · {dayData?.type} · S{currentWeekNum}
-                {weekData?.date && <span style={{ opacity: 0.55, marginLeft: 4 }}>· {weekData.date}</span>}
+                {(() => {
+                  const activeDayIdx = DAY_ORDER.indexOf(activeDay);
+                  const dk = getDayKey(activeDayIdx);
+                  const [y, m, d] = dk.split('-');
+                  const dateObj = new Date(Number(y), Number(m)-1, Number(d));
+                  const label = dateObj.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+                  return <span style={{ opacity: 0.55, marginLeft: 4 }}>· {label}</span>;
+                })()}
               </div>
             </div>
             <svg className="progress-ring" width="68" height="68" viewBox="0 0 68 68">
