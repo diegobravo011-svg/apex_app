@@ -211,8 +211,9 @@ export async function createFullWeek(userId, weekNumber, schedule, template) {
     await supabase.from('exercises').delete().eq('day_id', day.id)
 
     const exercises = []
-    for (let i = 0; i < tmpl.exercises.length; i++) {
-      const ex = await insertExercise(day.id, tmpl.exercises[i], i)
+    const exList = tmpl.exercises || []
+    for (let i = 0; i < exList.length; i++) {
+      const ex = await insertExercise(day.id, exList[i], i)
       exercises.push({
         id: ex.id,
         name: ex.name,

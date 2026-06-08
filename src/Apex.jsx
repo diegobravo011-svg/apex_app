@@ -186,14 +186,57 @@ const mergeWithTemplate = (weekData) => {
     merged.days[d] = {
       ...tmpl,
       ...stored,
-      exercises: stored.exercises || getExercisesForDay(d, sched).map((e, i) => ({
+      exercises: (stored.exercises?.length ? stored.exercises : getExercisesForDay(d, sched).map((e, i) => ({
         id: `${d}_${i}_local`,
         ...e,
         done: false,
-      })),
+      }))),
     };
   });
   return merged;
+};
+
+// ─── WEEK TEMPLATE HELPERS ────────────────────────────────────────────────────
+// Returns a full template with resistance day exercises from pool A or B,
+// and optionally pre-fills weights from the previous week.
+const buildFullTemplate = (sched, prevWeights = {}) => {
+  const pool = sched === "A" ? EXERCISES_A : EXERCISES_B;
+  return Object.fromEntries(
+    DAY_ORDER.map(dayKey => {
+      const base = BASE_DAYS[dayKey];
+      let exercises;
+      if (RESISTANCE_DAYS.includes(dayKey)) {
+        exercises = (pool[dayKey] || []).map(ex => ({
+          ...ex,
+          weight: prevWeights[dayKey]?.[ex.name] ?? ex.weight,
+        }));
+      } else {
+        exercises = base.exercises || [];
+      }
+      return [dayKey, { ...base, exercises }];
+    })
+  );
+};
+
+// Extracts { dayKey: { exName: weight } } from a week's data (for carrying over weights)
+const buildPrevWeights = (wkData) => {
+  const result = {};
+  for (const dayKey of RESISTANCE_DAYS) {
+    result[dayKey] = {};
+    const exs = wkData?.days?.[dayKey]?.exercises || [];
+    for (const ex of exs) {
+      if (ex.name && ex.weight) result[dayKey][ex.name] = ex.weight;
+    }
+  }
+  return result;
+};
+
+// Get template reps for a given schedule — used in per-category volume calc
+const getTemplateRepsFromPool = (dayKey, exName, sched) => {
+  if (!RESISTANCE_DAYS.includes(dayKey)) return null;
+  const pool = sched === "A" ? EXERCISES_A : EXERCISES_B;
+  const tmpl = (pool[dayKey] || []).find(e => e.name === exName);
+  return tmpl?.reps || null;
 };
 
 // ─── CARDIO DATA FORM ─────────────────────────────────────────────────────────
@@ -316,6 +359,7 @@ export default function Apex({ user, onSignOut }) {
   const [chartEx, setChartEx]     = useState("Squat");
   const [toast, setToast]         = useState(null);
   const [protocolOpen, setProtocolOpen] = useState(true);
+  const [progressTab, setProgressTab]   = useState("calendar");
   // creatine: { "2026-06-03": true, … }
   const [creatine, setCreatine]     = useState(loadCreatine);
   // bilateral: { "Lateral Raise": true, … } — stored in localStorage, keyed by exercise name
@@ -339,7 +383,7 @@ export default function Apex({ user, onSignOut }) {
       try {
         let data = await loadAllData(user.id);
         if (!data) {
-          const weekData = await createFullWeek(user.id, 1, "A", BASE_DAYS);
+          const weekData = await createFullWeek(user.id, 1, "A", buildFullTemplate("A"));
           data = { currentWeekNum: 1, schedule: "A", weeks: { 1: weekData } };
         }
         setCurrentWeekNum(data.currentWeekNum);
@@ -490,10 +534,13 @@ export default function Apex({ user, onSignOut }) {
     const next = currentWeekNum + 1;
     setLoading(true);
     try {
-      const weekData = await createFullWeek(user.id, next, schedule, BASE_DAYS);
-      setWeeks(prev => ({ ...prev, [next]: mergeWithTemplate(weekData) }));
+      const prevWeights = buildPrevWeights(weekData);
+      const template = buildFullTemplate(schedule, prevWeights);
+      const wd = await createFullWeek(user.id, next, schedule, template);
+      setWeeks(prev => ({ ...prev, [next]: mergeWithTemplate(wd) }));
       setCurrentWeekNum(next);
       setActiveDay(DAY_ORDER[0]);
+      showToast(`Semana ${next} creada con pesos heredados ✓`, "info");
     } catch (err) {
       showToast("Error al crear semana: " + err.message);
     } finally {
@@ -523,7 +570,10 @@ export default function Apex({ user, onSignOut }) {
     if (!weeks[next] && dir > 0) {
       setLoading(true);
       try {
-        const wd = await createFullWeek(user.id, next, schedule, BASE_DAYS);
+        const prevWk = weeks[currentWeekNum];
+        const prevWeights = buildPrevWeights(prevWk);
+        const template = buildFullTemplate(schedule, prevWeights);
+        const wd = await createFullWeek(user.id, next, schedule, template);
         setWeeks(prev => ({ ...prev, [next]: mergeWithTemplate(wd) }));
         setCurrentWeekNum(next);
       } catch {
@@ -1057,6 +1107,57 @@ export default function Apex({ user, onSignOut }) {
     .week-nav-btn:active { background: var(--text); color: var(--bg); border-color: var(--text); }
     .week-nav-label { font-size: 14px; font-weight: 400; color: var(--text); }
     .week-nav-sub { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+    /* ── PROGRESS TABS ── */
+    .prog-tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+    .prog-tab {
+      flex: 1; font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted);
+      background: transparent; border: none; border-bottom: 2px solid transparent;
+      padding: 10px 0; cursor: pointer; transition: all 0.15s; margin-bottom: -1px;
+    }
+    .prog-tab.active { color: var(--text); border-bottom-color: var(--text); }
+
+    /* ── CALENDAR ── */
+    .cal-summary { display: flex; gap: 10px; margin-bottom: 16px; }
+    .cal-sum-card { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 10px; text-align: center; }
+    .cal-sum-val { font-size: 26px; font-weight: 300; letter-spacing: -1px; color: var(--text); line-height: 1; }
+    .cal-sum-lbl { font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 4px; }
+    .cal-legend { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+    .cal-legend-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; }
+    .cal-legend-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .cal-month { margin-bottom: 20px; }
+    .cal-month-hdr { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 8px; text-transform: capitalize; letter-spacing: 0.2px; }
+    .cal-dow-row { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 4px; }
+    .cal-dow { font-size: 8px; color: var(--muted); font-family: 'DM Mono', monospace; text-align: center; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .cal-cell { aspect-ratio: 1; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: var(--pill); }
+    .cal-empty { background: transparent; }
+    .cal-future { opacity: 0.35; }
+    .cal-today { outline: 1.5px solid var(--text); outline-offset: 1px; }
+    .cal-num { font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace; line-height: 1; }
+    .cal-dot { width: 5px; height: 5px; border-radius: 50%; }
+    .cal-dot-full { background: #1A1917; }
+    .cal-dot-partial { background: #9E9A94; }
+    .cal-dot-planned { background: var(--border); }
+
+    /* ── CATEGORIES ── */
+    .cat-list { display: flex; flex-direction: column; gap: 12px; }
+    .cat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; }
+    .cat-hdr { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .cat-emoji { font-size: 22px; line-height: 1; }
+    .cat-name { font-size: 16px; font-weight: 500; color: var(--text); }
+    .cat-desc { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+    .cat-stats { display: flex; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+    .cat-stat { flex: 1; text-align: center; border-right: 1px solid var(--border); }
+    .cat-stat:last-child { border-right: none; }
+    .cat-val { font-size: 22px; font-weight: 300; letter-spacing: -0.5px; color: var(--text); line-height: 1; }
+    .cat-val-sm { font-size: 16px; }
+    .cat-lbl { font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 3px; }
+    .cat-bars { display: flex; gap: 3px; align-items: flex-end; height: 44px; }
+    .cat-bar-col { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; height: 100%; }
+    .cat-bar-bg { flex: 1; width: 100%; background: var(--pill); border-radius: 3px; overflow: hidden; display: flex; align-items: flex-end; }
+    .cat-bar-fill { width: 100%; border-radius: 3px; transition: height 0.4s; min-height: 2px; }
+    .cat-bar-lbl { font-size: 7px; color: var(--muted); font-family: 'DM Mono', monospace; }
   `;
 
   // ─── LOADING STATE ────────────────────────────────────────────────────────
@@ -1452,21 +1553,274 @@ export default function Apex({ user, onSignOut }) {
     </>
   );
 
+
   // ─── RENDER PROGRESS ──────────────────────────────────────────────────────
   const renderProgress = () => {
-    const W = 320, H = 110, pad = { l: 24, r: 8, t: 12, b: 8 };
-    const hasData = chartData.length > 1;
-    const wMax = hasData ? Math.max(...chartData.map(d => d.weight)) : 50;
-    const wMin = hasData ? Math.min(...chartData.map(d => d.weight)) : 0;
-    const yRange = (wMax - wMin) || 1;
-    const xStep  = hasData ? (W - pad.l - pad.r) / (chartData.length - 1) : 0;
-    const toX    = i => pad.l + i * xStep;
-    const toY    = w => pad.t + (H - pad.t - pad.b) * (1 - (w - wMin) / yRange);
-    const pathD  = hasData ? chartData.map((d, i) => `${i===0?"M":"L"}${toX(i)},${toY(d.weight)}`).join(" ") : "";
-    const areaD  = hasData ? `${pathD} L${toX(chartData.length-1)},${H} L${toX(0)},${H} Z` : "";
-    const first  = chartData[0]?.weight;
-    const last   = chartData[chartData.length-1]?.weight;
-    const gain   = first ? ((last - first) / first * 100).toFixed(1) : 0;
+    // ── Calendar date helpers ─────────────────────────────────────────────────
+    const getWeekMonday = (weekNum) => {
+      const today = new Date();
+      const d = today.getDay();
+      const offset = d === 0 ? 6 : d - 1;
+      const thisMon = new Date(today);
+      thisMon.setDate(today.getDate() - offset);
+      thisMon.setHours(0, 0, 0, 0);
+      const wMon = new Date(thisMon);
+      wMon.setDate(thisMon.getDate() - (currentWeekNum - weekNum) * 7);
+      return wMon;
+    };
+    const dayDateOf = (weekNum, dayKey) => {
+      const mon = getWeekMonday(weekNum);
+      const d = new Date(mon);
+      d.setDate(mon.getDate() + DAY_ORDER.indexOf(dayKey));
+      return d;
+    };
+    const toDS = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const todayStr = toDS(new Date());
+
+    // Build dateStatus map: dateStr → 'full' | 'partial' | 'planned' | 'rest'
+    const dateStatusMap = {};
+    Object.entries(weeks).forEach(([wn, wk]) => {
+      DAY_ORDER.forEach(dayKey => {
+        if (!wk.days?.[dayKey]) return;
+        const date = dayDateOf(parseInt(wn), dayKey);
+        const ds = toDS(date);
+        const exs = wk.days[dayKey].exercises || [];
+        if (exs.length === 0) { dateStatusMap[ds] = 'rest'; return; }
+        const done = exs.filter(e => e.done).length;
+        dateStatusMap[ds] = done === exs.length ? 'full' : done > 0 ? 'partial' : 'planned';
+      });
+    });
+
+    // ── Calendar tab ─────────────────────────────────────────────────────
+    const renderCalTab = () => {
+      const week1Mon = getWeekMonday(1);
+      const today = new Date();
+      const months = [];
+      const cur = new Date(week1Mon.getFullYear(), week1Mon.getMonth(), 1);
+      const end = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+      while (cur < end) { months.push(new Date(cur)); cur.setMonth(cur.getMonth() + 1); }
+
+      const allStatuses = Object.values(dateStatusMap).filter(s => s !== 'rest');
+      const fullDays  = allStatuses.filter(s => s === 'full').length;
+      const partDays  = allStatuses.filter(s => s === 'partial').length;
+      const rate      = allStatuses.length ? Math.round(fullDays / allStatuses.length * 100) : 0;
+
+      return (
+        <div>
+          <div className="cal-summary">
+            <div className="cal-sum-card">
+              <div className="cal-sum-val">{fullDays}</div>
+              <div className="cal-sum-lbl">completados</div>
+            </div>
+            <div className="cal-sum-card">
+              <div className="cal-sum-val">{partDays}</div>
+              <div className="cal-sum-lbl">parciales</div>
+            </div>
+            <div className="cal-sum-card">
+              <div className="cal-sum-val">{rate}%</div>
+              <div className="cal-sum-lbl">tasa éxito</div>
+            </div>
+          </div>
+
+          <div className="cal-legend">
+            <div className="cal-legend-item"><div className="cal-legend-dot" style={{background:'#1A1917'}}/><span>Completo</span></div>
+            <div className="cal-legend-item"><div className="cal-legend-dot" style={{background:'#9E9A94'}}/><span>Parcial</span></div>
+            <div className="cal-legend-item"><div className="cal-legend-dot" style={{background:'var(--border)'}}/><span>Sin realizar</span></div>
+          </div>
+
+          {months.map(month => {
+            const y = month.getFullYear(), m = month.getMonth();
+            const monthName = month.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+            const firstDow = new Date(y, m, 1).getDay();
+            const startOff = firstDow === 0 ? 6 : firstDow - 1;
+            const daysInMonth = new Date(y, m + 1, 0).getDate();
+            const cells = [...Array(startOff).fill(null)];
+            for (let day = 1; day <= daysInMonth; day++) cells.push(new Date(y, m, day));
+            return (
+              <div key={`${y}-${m}`} className="cal-month">
+                <div className="cal-month-hdr">{monthName}</div>
+                <div className="cal-dow-row">
+                  {['L','M','X','J','V','S','D'].map(lbl => <span key={lbl} className="cal-dow">{lbl}</span>)}
+                </div>
+                <div className="cal-grid">
+                  {cells.map((date, i) => {
+                    if (!date) return <div key={`e${i}`} className="cal-cell cal-empty" />;
+                    const ds = toDS(date);
+                    const status = dateStatusMap[ds];
+                    const isToday = ds === todayStr;
+                    const isFuture = date > new Date();
+                    return (
+                      <div key={ds} className={`cal-cell${isToday ? ' cal-today' : ''}${isFuture ? ' cal-future' : ''}`}>
+                        <span className="cal-num">{date.getDate()}</span>
+                        {status && status !== 'rest' && !isFuture &&
+                          <div className={`cal-dot cal-dot-${status}`} />}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    };
+
+    // ── Categories tab ──────────────────────────────────────────────────
+    const CATS = [
+      { id: 'lower', label: 'Lower Body', emoji: '🦵', desc: 'Piernas · Cuádriceps · Isquiotibiales', days: ['lun'], isRes: true },
+      { id: 'upper', label: 'Upper Body', emoji: '💪', desc: 'Torso · Pecho · Hombros · Espalda', days: ['mie'], isRes: true },
+      { id: 'arms',  label: 'Arms',       emoji: '🏋️', desc: 'Brazos · Bíceps · Tríceps', days: ['sab'], isRes: true },
+      { id: 'cardio',label: 'Cardio',     emoji: '❤️', desc: 'Recuperación · Zona 2 · HIIT · Dom', days: ['mar','jue','vie','dom'], isRes: false },
+    ];
+    const renderCatTab = () => {
+      const sorted = Object.entries(weeks).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+      return (
+        <div className="cat-list">
+          {CATS.map(cat => {
+            let totalDays = 0, doneDays = 0, vol = 0;
+            const bars = [];
+            sorted.forEach(([wn, wk]) => {
+              let cd = 0, ct = 0;
+              cat.days.forEach(dk => {
+                const dd = wk.days?.[dk];
+                if (!dd) return;
+                const exs = dd.exercises || [];
+                if (exs.length === 0) return;
+                totalDays++; ct++;
+                const done = exs.filter(e => e.done).length;
+                if (done === exs.length) { doneDays++; cd++; }
+                if (cat.isRes) {
+                  exs.forEach(ex => {
+                    const w = parseFloat(ex.weight);
+                    if (!w || isNaN(w) || ex.weight === '—') return;
+                    const tr = getTemplateRepsFromPool(dk, ex.name, wk.schedule || schedule);
+                    const parsed = parseRepsString(ex.reps || tr || '');
+                    if (!parsed) return;
+                    vol += w * parsed.sets * parsed.reps * (bilateralMap[ex.name] ? 2 : 1);
+                  });
+                }
+              });
+              if (ct > 0) bars.push({ wn, pct: Math.round(cd / ct * 100) });
+            });
+            const avg = totalDays ? Math.round(doneDays / totalDays * 100) : 0;
+            const maxBar = Math.max(...bars.map(b => b.pct), 1);
+            return (
+              <div key={cat.id} className="cat-card">
+                <div className="cat-hdr">
+                  <span className="cat-emoji">{cat.emoji}</span>
+                  <div>
+                    <div className="cat-name">{cat.label}</div>
+                    <div className="cat-desc">{cat.desc}</div>
+                  </div>
+                </div>
+                <div className="cat-stats">
+                  <div className="cat-stat">
+                    <div className="cat-val">{doneDays}</div>
+                    <div className="cat-lbl">días ✓</div>
+                  </div>
+                  <div className="cat-stat">
+                    <div className="cat-val">{avg}%</div>
+                    <div className="cat-lbl">promedio</div>
+                  </div>
+                  {cat.isRes && vol > 0 && (
+                    <div className="cat-stat">
+                      <div className="cat-val cat-val-sm">{fmtVolume(vol)}</div>
+                      <div className="cat-lbl">vol. acum.</div>
+                    </div>
+                  )}
+                </div>
+                {bars.length > 0 && (
+                  <div className="cat-bars">
+                    {bars.map(({ wn, pct }) => (
+                      <div key={wn} className="cat-bar-col">
+                        <div className="cat-bar-bg">
+                          <div className="cat-bar-fill" style={{ height: `${pct / maxBar * 100}%`, background: pct === 100 ? '#1A1917' : '#C8C4BE' }} />
+                        </div>
+                        <span className="cat-bar-lbl">S{wn}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    };
+
+    // ── Exercises tab (per-exercise weight chart) ─────────────────────────────
+    const renderExTab = () => {
+      const W = 320, H = 110, pad = { l: 24, r: 8, t: 12, b: 8 };
+      const hasData = chartData.length > 1;
+      const wMax = hasData ? Math.max(...chartData.map(d => d.weight)) : 50;
+      const wMin = hasData ? Math.min(...chartData.map(d => d.weight)) : 0;
+      const yRange = (wMax - wMin) || 1;
+      const xStep  = hasData ? (W - pad.l - pad.r) / (chartData.length - 1) : 0;
+      const toX    = i => pad.l + i * xStep;
+      const toY    = w => pad.t + (H - pad.t - pad.b) * (1 - (w - wMin) / yRange);
+      const pathD  = hasData ? chartData.map((d, i) => `${i===0?"M":"L"}${toX(i)},${toY(d.weight)}`).join(" ") : "";
+      const areaD  = hasData ? `${pathD} L${toX(chartData.length-1)},${H} L${toX(0)},${H} Z` : "";
+      const first  = chartData[0]?.weight;
+      const last   = chartData[chartData.length-1]?.weight;
+      const gain   = first ? ((last - first) / first * 100).toFixed(1) : 0;
+      return trackedList.length === 0 ? (
+        <div className="no-data">
+          Aún no hay pesos registrados.<br />
+          Agrega pesos en cada ejercicio<br />
+          y aparecerán aquí.
+        </div>
+      ) : (
+        <>
+          <div className="chart-pills">
+            {trackedList.map(n => (
+              <button key={n} className={`cpill ${chartEx === n ? "active" : ""}`}
+                onClick={() => setChartEx(n)}>{n}</button>
+            ))}
+          </div>
+          <div className="chart-card">
+            <div className="chart-name">{chartEx}</div>
+            <div className="chart-range">{chartData.length} registros · {chartData[0]?.week} – {chartData[chartData.length-1]?.week}</div>
+            {hasData ? (
+              <>
+                <div className="chart-area">
+                  <svg className="chart-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#1A1917" stopOpacity="0.08" />
+                        <stop offset="100%" stopColor="#1A1917" stopOpacity="0" />
+                      </linearGradient>
+                    </defs>
+                    <path d={areaD} fill="url(#g)" />
+                    <path d={pathD} fill="none" stroke="#1A1917" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    {chartData.map((d, i) => (
+                      <g key={i}>
+                        <circle cx={toX(i)} cy={toY(d.weight)} r="3.5" fill="#1A1917" />
+                        <text x={toX(i)} y={toY(d.weight)-8} textAnchor="middle" fill="#9E9A94" fontFamily="DM Mono,monospace" fontSize="8">{d.weight}kg</text>
+                      </g>
+                    ))}
+                    <text x="0" y={pad.t+4} fill="#C8C4BE" fontFamily="DM Mono" fontSize="8">{Math.round(wMax)}</text>
+                    <text x="0" y={H-2}    fill="#C8C4BE" fontFamily="DM Mono" fontSize="8">{Math.round(wMin)}</text>
+                  </svg>
+                </div>
+                <div className="chart-x-labels">
+                  {chartData.map((d, i) => <span key={i} className="chart-x-lbl">{d.week}</span>)}
+                </div>
+                <div className="chart-stats">
+                  <div className="cstat"><div className="cstat-val">{first}kg</div><div className="cstat-lbl">inicio</div></div>
+                  <div className="cstat"><div className="cstat-val">{last}kg</div><div className="cstat-lbl">actual</div></div>
+                  <div className="cstat">
+                    <div className={`cstat-val ${Number(gain)>0?"up":Number(gain)<0?"dn":""}`}>{gain > 0 ? "+" : ""}{gain}%</div>
+                    <div className="cstat-lbl">progreso</div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="no-data">Registra al menos 2 semanas<br />para ver la curva.</div>
+            )}
+          </div>
+        </>
+      );
+    };
 
     return (
       <>
@@ -1479,76 +1833,14 @@ export default function Apex({ user, onSignOut }) {
         </div>
         <div className="progress-body">
           <div className="section-title">Progreso</div>
-
-          {trackedList.length === 0 ? (
-            <div className="no-data">
-              Aún no hay pesos registrados.<br />
-              Agrega pesos en cada ejercicio<br />
-              y aparecerán aquí.
-            </div>
-          ) : (
-            <>
-              <div className="chart-pills">
-                {trackedList.map(n => (
-                  <button key={n} className={`cpill ${chartEx === n ? "active" : ""}`}
-                    onClick={() => setChartEx(n)}>{n}</button>
-                ))}
-              </div>
-
-              <div className="chart-card">
-                <div className="chart-name">{chartEx}</div>
-                <div className="chart-range">{chartData.length} registros · semanas {chartData[0]?.week} – {chartData[chartData.length-1]?.week}</div>
-
-                {hasData ? (
-                  <>
-                    <div className="chart-area">
-                      <svg className="chart-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-                        <defs>
-                          <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#1A1917" stopOpacity="0.08" />
-                            <stop offset="100%" stopColor="#1A1917" stopOpacity="0" />
-                          </linearGradient>
-                        </defs>
-                        <path d={areaD} fill="url(#g)" />
-                        <path d={pathD} fill="none" stroke="#1A1917" strokeWidth="1.5"
-                          strokeLinecap="round" strokeLinejoin="round" />
-                        {chartData.map((d, i) => (
-                          <g key={i}>
-                            <circle cx={toX(i)} cy={toY(d.weight)} r="3.5" fill="#1A1917" />
-                            <text x={toX(i)} y={toY(d.weight)-8} textAnchor="middle"
-                              fill="#9E9A94" fontFamily="DM Mono,monospace" fontSize="8">{d.weight}kg</text>
-                          </g>
-                        ))}
-                        <text x="0" y={pad.t+4} fill="#C8C4BE" fontFamily="DM Mono" fontSize="8">{Math.round(wMax)}</text>
-                        <text x="0" y={H-2}    fill="#C8C4BE" fontFamily="DM Mono" fontSize="8">{Math.round(wMin)}</text>
-                      </svg>
-                    </div>
-                    <div className="chart-x-labels">
-                      {chartData.map((d, i) => <span key={i} className="chart-x-lbl">{d.week}</span>)}
-                    </div>
-                    <div className="chart-stats">
-                      <div className="cstat">
-                        <div className="cstat-val">{first}kg</div>
-                        <div className="cstat-lbl">inicio</div>
-                      </div>
-                      <div className="cstat">
-                        <div className="cstat-val">{last}kg</div>
-                        <div className="cstat-lbl">actual</div>
-                      </div>
-                      <div className="cstat">
-                        <div className={`cstat-val ${Number(gain)>0?"up":Number(gain)<0?"dn":""}`}>
-                          {gain > 0 ? "+" : ""}{gain}%
-                        </div>
-                        <div className="cstat-lbl">progreso</div>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="no-data">Registra al menos 2 semanas<br />para ver la curva.</div>
-                )}
-              </div>
-            </>
-          )}
+          <div className="prog-tabs">
+            <button className={`prog-tab ${progressTab === 'calendar' ? 'active' : ''}`} onClick={() => setProgressTab('calendar')}>Calendario</button>
+            <button className={`prog-tab ${progressTab === 'categories' ? 'active' : ''}`} onClick={() => setProgressTab('categories')}>Categorías</button>
+            <button className={`prog-tab ${progressTab === 'exercises' ? 'active' : ''}`} onClick={() => setProgressTab('exercises')}>Ejercicios</button>
+          </div>
+          {progressTab === 'calendar'   && renderCalTab()}
+          {progressTab === 'categories' && renderCatTab()}
+          {progressTab === 'exercises'  && renderExTab()}
         </div>
       </>
     );
