@@ -387,6 +387,41 @@ export default function Apex({ user, onSignOut }) {
           const weekData = await createFullWeek(user.id, 1, "A", buildFullTemplate("A"));
           data = { currentWeekNum: 1, schedule: "A", weeks: { 1: weekData } };
         }
+
+        // ── Repair: resistance days with no exercises in DB get fake local IDs
+        // which break toggle/saveEdit.  Insert real rows so every exercise
+        // has a genuine Supabase UUID before we set state.
+        for (const [, wk] of Object.entries(data.weeks)) {
+          const sched = wk.schedule || data.schedule || "A";
+          const pool  = sched === "A" ? EXERCISES_A : EXERCISES_B;
+          for (const dayKey of RESISTANCE_DAYS) {
+            const day = wk.days?.[dayKey];
+            if (!day?._dayId) continue;           // day not in DB yet
+            if (day.exercises?.length > 0) continue; // already has real rows
+
+            const exTemplates = pool[dayKey] || [];
+            const inserted = [];
+            for (let i = 0; i < exTemplates.length; i++) {
+              try {
+                const ex = await insertExercise(day._dayId, exTemplates[i], i);
+                inserted.push({
+                  id:       ex.id,
+                  name:     ex.name,
+                  muscle:   ex.muscle   || exTemplates[i].muscle,
+                  weight:   ex.weight   || "",
+                  reps:     ex.reps     || "",
+                  activity: ex.activity || "",
+                  done:     false,
+                  position: i,
+                });
+              } catch (e) {
+                console.warn("repair insert failed:", dayKey, exTemplates[i].name, e);
+              }
+            }
+            if (inserted.length) day.exercises = inserted;
+          }
+        }
+
         setCurrentWeekNum(data.currentWeekNum);
         setSchedule(data.schedule);
         setWeeks(() => {
