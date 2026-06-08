@@ -135,10 +135,10 @@ const BASE_DAYS = {
   lun: { label: "Lunes",    name: "Piernas",      type: "Resistencia",     warmup: true,  isCardio: false },
   mar: { label: "Martes",   name: "Recuperación", type: "Calor & Frío",    warmup: false, isCardio: true,
     exercises: [
-      { name: "Ducha fría",            muscle: "Recuperación",  activity: "" },
-      { name: "Caminata / Natación",   muscle: "Cardio suave",  activity: "15–20 min" },
-      { name: "Movilidad dinámica",    muscle: "WGS · 90/90 · Cat-Cow · Deep Squat", activity: "" },
-      { name: "Hidratación & Proteína", muscle: "Nutrición",    activity: "" },
+      { name: "Ducha fría",            muscle: "Recuperación",  activity: "", hint: "3 min · agua fría al final" },
+      { name: "Caminata / Natación",   muscle: "Cardio suave",  activity: "" },
+      { name: "Movilidad dinámica",    muscle: "WGS · 90/90 · Cat-Cow · Deep Squat", activity: "", hint: "15–20 min · estiramientos dinámicos" },
+      { name: "Hidratación & Proteína", muscle: "Nutrición",    activity: "", hint: "~40 g proteína · ≥ 2 L agua" },
     ],
   },
   mie: { label: "Miércoles", name: "Torso & Cuello", type: "Fuerza",      warmup: true,  isCardio: false },
@@ -1032,6 +1032,17 @@ export default function Apex({ user, onSignOut }) {
     }
     .add-type-btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 
+    /* ── HINT CHIP (reminder-only exercises: ducha fría, movilidad, etc.) ── */
+    .hint-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--pill); border: 1px solid var(--border);
+      border-radius: 8px; padding: 5px 10px; margin-top: 6px;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .hint-chip:active { background: var(--border); }
+    .hint-chip-icon { font-size: 11px; opacity: 0.7; }
+    .hint-chip-text { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; letter-spacing: 0.2px; }
+
     /* ── WEEK VIEW ── */
     .week-body { padding: 24px 20px 100px; }
     .section-title { font-size: 22px; font-weight: 300; letter-spacing: -0.5px; margin-bottom: 20px; color: var(--text); }
@@ -1290,6 +1301,9 @@ export default function Apex({ user, onSignOut }) {
     const isEditing = editId === ex.id;
     const isCardioDay = dayData?.isCardio;
     const isFixedWeight = ex.weight === "—"; // abs exercises with fixed weight marker
+    // Look up hint from template (not stored in DB) — recovery day reminders
+    const templateHint = BASE_DAYS[activeDay]?.exercises?.find(t => t.name === ex.name)?.hint;
+    const isHint = !!templateHint;
 
     return (
       <div key={ex.id} className="ex-row" onClick={() => !isEditing && toggle(ex.id)}>
@@ -1303,7 +1317,13 @@ export default function Apex({ user, onSignOut }) {
           <div className={`ex-name ${ex.done ? "done" : ""}`} onClick={() => toggle(ex.id)}>{ex.name}</div>
           <div className="ex-muscle">{ex.muscle}</div>
 
-          {isCardioDay ? (
+          {isHint ? (
+            // Reminder-only chip: tap the row to tick, no editable form
+            <div className="hint-chip" onClick={() => toggle(ex.id)}>
+              <span className="hint-chip-icon">⏱</span>
+              <span className="hint-chip-text">{templateHint}</span>
+            </div>
+          ) : isCardioDay ? (
             <CardioDataForm
               ex={ex}
               onSave={(data) => saveActivity(ex.id, data)}
