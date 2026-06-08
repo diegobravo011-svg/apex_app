@@ -356,6 +356,7 @@ export default function Apex({ user, onSignOut }) {
   const [editVals, setEditVals]   = useState({});
   const [showAdd, setShowAdd]     = useState(false);
   const [newEx, setNewEx]         = useState({ name: "", muscle: "", weight: "", reps: "", activity: "" });
+  const [newExType, setNewExType]  = useState("resistance"); // "resistance" | "cardio"
   const [chartEx, setChartEx]     = useState("Squat");
   const [toast, setToast]         = useState(null);
   const [protocolOpen, setProtocolOpen] = useState(true);
@@ -988,6 +989,13 @@ export default function Apex({ user, onSignOut }) {
     .add-input::placeholder { color: var(--muted); }
     .add-row { display: flex; gap: 8px; }
     .add-row .add-input { margin-bottom: 0; }
+    .add-type-row { display: flex; gap: 6px; margin-bottom: 10px; }
+    .add-type-btn {
+      flex: 1; font-size: 12px; font-family: 'DM Sans', sans-serif; color: var(--muted);
+      background: var(--pill); border: 1px solid var(--border); border-radius: 10px;
+      padding: 8px 0; cursor: pointer; transition: all 0.15s; font-weight: 400;
+    }
+    .add-type-btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 
     /* ── WEEK VIEW ── */
     .week-body { padding: 24px 20px 100px; }
@@ -1425,28 +1433,48 @@ export default function Apex({ user, onSignOut }) {
           {renderProtocolCard()}
 
           <div className="action-row">
-            <button className="ghost-btn" onClick={() => setShowAdd(s => !s)}>+ agregar</button>
+            <button className="ghost-btn" onClick={() => {
+              setNewExType(dayData?.isCardio ? "cardio" : "resistance");
+              setShowAdd(s => !s);
+            }}>+ agregar</button>
             <button className="ghost-btn" onClick={resetDay}>reiniciar día</button>
           </div>
 
           {showAdd && (
             <div className="add-panel">
               <div className="add-title">Nuevo ejercicio</div>
-              <input className="add-input" placeholder="Nombre" value={newEx.name}
+
+              {/* Type toggle */}
+              <div className="add-type-row">
+                <button
+                  className={`add-type-btn ${newExType === 'resistance' ? 'active' : ''}`}
+                  onClick={() => { setNewExType('resistance'); setNewEx(v => ({ ...v, activity: '' })); }}
+                >🏋️ Fuerza</button>
+                <button
+                  className={`add-type-btn ${newExType === 'cardio' ? 'active' : ''}`}
+                  onClick={() => { setNewExType('cardio'); setNewEx(v => ({ ...v, weight: '', reps: '' })); }}
+                >🏃 Cardio</button>
+              </div>
+
+              <input className="add-input" placeholder="Nombre (ej: Trote, HIIT, Squat…)" value={newEx.name}
                 onChange={e => setNewEx(v => ({ ...v, name: e.target.value }))} />
-              <input className="add-input" placeholder="Músculo / grupo"
+              <input className="add-input" placeholder="Músculo / grupo (ej: Cardio · Zona 2)"
                 value={newEx.muscle} onChange={e => setNewEx(v => ({ ...v, muscle: e.target.value }))} />
-              {dayData?.isCardio ? (
-                <input className="add-input" placeholder="Actividad / duración"
-                  value={newEx.activity} onChange={e => setNewEx(v => ({ ...v, activity: e.target.value }))} />
+
+              {newExType === 'cardio' ? (
+                <CardioDataForm
+                  ex={{ activity: newEx.activity }}
+                  onSave={(data) => setNewEx(v => ({ ...v, activity: data }))}
+                />
               ) : (
                 <div className="add-row">
-                  <input className="add-input" placeholder="Peso (número)" type="number" min="0" step="0.5"
+                  <input className="add-input" placeholder="Peso (kg)" type="number" min="0" step="0.5"
                     value={newEx.weight} onChange={e => setNewEx(v => ({ ...v, weight: e.target.value }))} />
-                  <input className="add-input" placeholder="Series×Reps" value={newEx.reps}
-                    onChange={e => setNewEx(v => ({ ...v, reps: e.target.value }))} />
+                  <input className="add-input" placeholder="Series×Reps (ej: 3×12)"
+                    value={newEx.reps} onChange={e => setNewEx(v => ({ ...v, reps: e.target.value }))} />
                 </div>
               )}
+
               <div className="edit-actions" style={{ marginTop: 12 }}>
                 <button className="cancel-btn" onClick={() => setShowAdd(false)}>Cancelar</button>
                 <button className="save-btn" onClick={addEx}>Agregar</button>
