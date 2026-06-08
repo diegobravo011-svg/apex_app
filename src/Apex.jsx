@@ -460,6 +460,27 @@ export default function Apex({ user, onSignOut }) {
     });
   }, []);
 
+  // ─── Ensure an exercise has a real Supabase UUID before DB operations.
+  // If the id looks like a local placeholder (e.g. "lun_0_local"), insert the
+  // exercise right now to get a real row, update local state, and return the
+  // real id.  Completely transparent to the user.
+  const ensureRealId = async (ex, dayKey = activeDay, weekNum = currentWeekNum) => {
+    if (!String(ex.id).includes("_local") && !String(ex.id).startsWith("temp_")) {
+      return ex.id; // already a real UUID
+    }
+    const day = weeks[weekNum]?.days?.[dayKey];
+    if (!day?._dayId) throw new Error("day not in DB");
+    const position = (day.exercises || []).findIndex(e => e.id === ex.id);
+    const saved = await insertExercise(day._dayId, ex, position >= 0 ? position : 0);
+    // Replace the local id with the real one in state
+    updateLocal(w => {
+      const exs = w[weekNum]?.days?.[dayKey]?.exercises;
+      const found = exs?.find(e => e.id === ex.id);
+      if (found) found.id = saved.id;
+    });
+    return saved.id;
+  };
+
   // ─── Toggle exercise done
   const toggle = async (id) => {
     const ex = exercises.find(e => e.id === id);
@@ -469,8 +490,10 @@ export default function Apex({ user, onSignOut }) {
       const e = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(x => x.id === id);
       if (e) e.done = newDone;
     });
-    try { await toggleExercise(id, newDone); }
-    catch {
+    try {
+      const realId = await ensureRealId(ex);
+      await toggleExercise(realId, newDone);
+    } catch {
       updateLocal(w => {
         const e = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(x => x.id === id);
         if (e) e.done = !newDone;
@@ -500,8 +523,10 @@ export default function Apex({ user, onSignOut }) {
     });
     setEditId(null);
     if (Object.keys(dbFields).length) {
-      try { await updateExercise(id, dbFields); }
-      catch { showToast("Error al guardar"); }
+      try {
+        const realId = await ensureRealId(ex);
+        await updateExercise(realId, dbFields);
+      } catch { showToast("Error al guardar"); }
     }
   };
 
