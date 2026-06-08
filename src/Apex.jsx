@@ -532,23 +532,29 @@ export default function Apex({ user, onSignOut }) {
 
   // ─── Delete exercise
   const delEx = async (id) => {
+    const ex = exercises.find(e => e.id === id);
     updateLocal(w => {
       const day = w[currentWeekNum]?.days?.[activeDay];
       if (day) day.exercises = day.exercises.filter(e => e.id !== id);
     });
     setEditId(null);
+    // Skip DB delete for local-only placeholder IDs (nothing to delete)
+    if (String(id).includes("_local") || String(id).startsWith("temp_")) return;
     try { await deleteExercise(id); }
     catch { showToast("Error al eliminar"); }
   };
 
   // ─── Save activity (cardio notes)
   const saveActivity = async (id, val) => {
+    const ex = exercises.find(e => e.id === id);
     updateLocal(w => {
-      const ex = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(e => e.id === id);
-      if (ex) ex.activity = val;
+      const e = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(e => e.id === id);
+      if (e) e.activity = val;
     });
-    try { await updateExercise(id, { activity: val }); }
-    catch { showToast("Error al guardar actividad"); }
+    try {
+      const realId = ex ? await ensureRealId(ex) : id;
+      await updateExercise(realId, { activity: val });
+    } catch { showToast("Error al guardar actividad"); }
   };
 
   // ─── Add new exercise
