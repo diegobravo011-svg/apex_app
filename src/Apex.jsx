@@ -9,6 +9,7 @@ import {
   resetDayExercises,
   updateWeekSchedule,
   upsertWeek,
+  upsertDay,
 } from "./lib/db";
 
 // ─── PROTOCOL CONTEXT PER DAY ─────────────────────────────────────────────────
@@ -463,13 +464,25 @@ export default function Apex({ user, onSignOut }) {
   // ─── Ensure an exercise has a real Supabase UUID before DB operations.
   // If the id looks like a local placeholder (e.g. "lun_0_local"), insert the
   // exercise right now to get a real row, update local state, and return the
-  // real id.  Completely transparent to the user.
+  // real id.  If the day itself is not in DB yet, create it first.
   const ensureRealId = async (ex, dayKey = activeDay, weekNum = currentWeekNum) => {
     if (!String(ex.id).includes("_local") && !String(ex.id).startsWith("temp_")) {
       return ex.id; // already a real UUID
     }
-    const day = weeks[weekNum]?.days?.[dayKey];
-    if (!day?._dayId) throw new Error("day not in DB");
+    let day = weeks[weekNum]?.days?.[dayKey];
+    // If the day doesn't have a _dayId, create it in DB first
+    if (!day?._dayId) {
+      const wk = weeks[weekNum];
+      if (!wk?._weekId) throw new Error("week not in DB");
+      const newDay = await upsertDay(wk._weekId, dayKey);
+      // Store the new _dayId in local state
+      updateLocal(w => {
+        if (w[weekNum]?.days?.[dayKey]) {
+          w[weekNum].days[dayKey]._dayId = newDay.id;
+        }
+      });
+      day = { ...(day || {}), _dayId: newDay.id };
+    }
     const position = (day.exercises || []).findIndex(e => e.id === ex.id);
     const saved = await insertExercise(day._dayId, ex, position >= 0 ? position : 0);
     // Replace the local id with the real one in state
