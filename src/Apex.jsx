@@ -10,6 +10,7 @@ import {
   updateWeekSchedule,
   upsertWeek,
   upsertDay,
+  getCurrentWeekMonday,
 } from "./lib/db";
 
 // ─── PROTOCOL CONTEXT PER DAY ─────────────────────────────────────────────────
@@ -350,6 +351,25 @@ const loadBilateral = () => {
 };
 const saveBilateral = (map) => localStorage.setItem("apex_bilateral", JSON.stringify(map));
 
+// ─── Compute which week number corresponds to "today" based on week_start_date stored in weeks
+// Returns the weekNum whose monday <= today < monday+7, or maxWeek if none matches exactly
+function computeRealWeekNum(weeksMap) {
+  const todayMon = getCurrentWeekMonday(); // YYYY-MM-DD
+  let best = null;
+  let bestNum = 1;
+  for (const [wn, wk] of Object.entries(weeksMap)) {
+    const wsd = wk.week_start_date;
+    if (!wsd) continue;
+    if (wsd <= todayMon) {
+      if (!best || wsd > best) {
+        best = wsd;
+        bestNum = parseInt(wn);
+      }
+    }
+  }
+  return bestNum;
+}
+
 export default function Apex({ user, onSignOut }) {
   const [screen, setScreen]       = useState("tracker");
   const [activeDay, setActiveDay] = useState(DAY_ORDER[TODAY_IDX]);
@@ -369,9 +389,19 @@ export default function Apex({ user, onSignOut }) {
 
   // ─── Remote state
   const [weeks, setWeeks]             = useState({});
-  const [currentWeekNum, setCurrentWeekNum] = useState(1);
+  // trackerWeekNum: la semana que muestra el TRACKER (puede ser pasada para editar)
+  const [trackerWeekNum, setTrackerWeekNum] = useState(1);
+  // realWeekNum: la semana que corresponde a HOY según calendario
+  const [realWeekNum, setRealWeekNum] = useState(1);
+  // viewedWeekNum: la semana visible en la vista SEMANA (independiente del tracker)
+  const [viewedWeekNum, setViewedWeekNum] = useState(1);
+  // maxWeekNum: la semana con número más alto (para saber hasta dónde se puede navegar)
+  const [maxWeekNum, setMaxWeekNum] = useState(1);
   const [schedule, setSchedule]       = useState("A");
   const [loading, setLoading]         = useState(true);
+
+  // Alias: currentWeekNum = trackerWeekNum (usado por el tracker)
+  const currentWeekNum = trackerWeekNum;
 
   // ─── Show toast briefly
   const showToast = (msg, type = "error") => {
@@ -385,8 +415,10 @@ export default function Apex({ user, onSignOut }) {
       try {
         let data = await loadAllData(user.id);
         if (!data) {
-          const weekData = await createFullWeek(user.id, 1, "A", buildFullTemplate("A"));
-          data = { currentWeekNum: 1, schedule: "A", weeks: { 1: weekData } };
+          const todayMon = getCurrentWeekMonday();
+          const weekData = await createFullWeek(user.id, 1, "A", buildFullTemplate("A"), todayMon);
+          weekData.week_start_date = todayMon;
+          data = { maxWeekNum: 1, schedule: "A", weeks: { 1: weekData } };
         }
 
         // ── Repair: resistance days with no exercises in DB get fake local IDs
@@ -423,15 +455,20 @@ export default function Apex({ user, onSignOut }) {
           }
         }
 
-        setCurrentWeekNum(data.currentWeekNum);
+        const mergedWeeks = {};
+        for (const [wn, wd] of Object.entries(data.weeks)) {
+          mergedWeeks[wn] = mergeWithTemplate(wd);
+        }
+
+        const mx = data.maxWeekNum;
+        const real = computeRealWeekNum(mergedWeeks) || mx;
+
+        setMaxWeekNum(mx);
+        setRealWeekNum(real);
+        setTrackerWeekNum(real);
+        setViewedWeekNum(real);
         setSchedule(data.schedule);
-        setWeeks(() => {
-          const merged = {};
-          for (const [wn, wd] of Object.entries(data.weeks)) {
-            merged[wn] = mergeWithTemplate(wd);
-          }
-          return merged;
-        });
+        setWeeks(mergedWeeks);
       } catch (err) {
         showToast("Error cargando datos: " + err.message);
       } finally {
@@ -442,13 +479,16 @@ export default function Apex({ user, onSignOut }) {
   }, [user.id]);
 
   // ─── Derived
-  const weekData  = weeks[currentWeekNum];
+  // weekData: semana que muestra el tracker
+  const weekData  = weeks[trackerWeekNum];
+  // weekDataViewed: semana que muestra la vista Semana
+  const weekDataViewed = weeks[viewedWeekNum];
   const dayData   = weekData?.days?.[activeDay];
   const exercises = dayData?.exercises || [];
   const doneCount = exercises.filter(e => e.done).length;
   const pct       = exercises.length ? Math.round(doneCount / exercises.length * 100) : 0;
   const totalDays = DAY_ORDER.filter(d => {
-    const exs = weekData?.days?.[d]?.exercises || [];
+    const exs = weekDataViewed?.days?.[d]?.exercises || [];
     return exs.length && exs.every(e => e.done);
   }).length;
 
@@ -500,7 +540,7 @@ export default function Apex({ user, onSignOut }) {
     if (!ex) return;
     const newDone = !ex.done;
     updateLocal(w => {
-      const e = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(x => x.id === id);
+      const e = w[trackerWeekNum]?.days?.[activeDay]?.exercises?.find(x => x.id === id);
       if (e) e.done = newDone;
     });
     try {
@@ -508,7 +548,7 @@ export default function Apex({ user, onSignOut }) {
       await toggleExercise(realId, newDone);
     } catch {
       updateLocal(w => {
-        const e = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(x => x.id === id);
+        const e = w[trackerWeekNum]?.days?.[activeDay]?.exercises?.find(x => x.id === id);
         if (e) e.done = !newDone;
       });
       showToast("Error al guardar");
@@ -531,7 +571,7 @@ export default function Apex({ user, onSignOut }) {
     if (editVals.weight !== undefined) dbFields.weight = editVals.weight;
     if (editVals.reps   !== undefined) dbFields.reps   = editVals.reps;
     updateLocal(w => {
-      const ex = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(e => e.id === id);
+      const ex = w[trackerWeekNum]?.days?.[activeDay]?.exercises?.find(e => e.id === id);
       if (ex) Object.assign(ex, dbFields);
     });
     setEditId(null);
@@ -547,7 +587,7 @@ export default function Apex({ user, onSignOut }) {
   const delEx = async (id) => {
     const ex = exercises.find(e => e.id === id);
     updateLocal(w => {
-      const day = w[currentWeekNum]?.days?.[activeDay];
+      const day = w[trackerWeekNum]?.days?.[activeDay];
       if (day) day.exercises = day.exercises.filter(e => e.id !== id);
     });
     setEditId(null);
@@ -561,7 +601,7 @@ export default function Apex({ user, onSignOut }) {
   const saveActivity = async (id, val) => {
     const ex = exercises.find(e => e.id === id);
     updateLocal(w => {
-      const e = w[currentWeekNum]?.days?.[activeDay]?.exercises?.find(e => e.id === id);
+      const e = w[trackerWeekNum]?.days?.[activeDay]?.exercises?.find(e => e.id === id);
       if (e) e.activity = val;
     });
     try {
@@ -578,20 +618,20 @@ export default function Apex({ user, onSignOut }) {
     const position = exercises.length;
     const tempId = `temp_${Date.now()}`;
     updateLocal(w => {
-      w[currentWeekNum]?.days?.[activeDay]?.exercises?.push({ id: tempId, ...newEx, done: false, position });
+      w[trackerWeekNum]?.days?.[activeDay]?.exercises?.push({ id: tempId, ...newEx, done: false, position });
     });
     setNewEx({ name: "", muscle: "", weight: "", reps: "", activity: "" });
     setShowAdd(false);
     try {
       const saved = await insertExercise(day._dayId, newEx, position);
       updateLocal(w => {
-        const exs = w[currentWeekNum]?.days?.[activeDay]?.exercises;
+        const exs = w[trackerWeekNum]?.days?.[activeDay]?.exercises;
         const i = exs?.findIndex(e => e.id === tempId);
         if (i !== undefined && i >= 0) exs[i].id = saved.id;
       });
     } catch {
       updateLocal(w => {
-        const day = w[currentWeekNum]?.days?.[activeDay];
+        const day = w[trackerWeekNum]?.days?.[activeDay];
         if (day) day.exercises = day.exercises.filter(e => e.id !== tempId);
       });
       showToast("Error al agregar ejercicio");
@@ -603,23 +643,34 @@ export default function Apex({ user, onSignOut }) {
     const day = weekData?.days?.[activeDay];
     if (!day?._dayId) return;
     updateLocal(w => {
-      w[currentWeekNum]?.days?.[activeDay]?.exercises?.forEach(e => e.done = false);
+      w[trackerWeekNum]?.days?.[activeDay]?.exercises?.forEach(e => e.done = false);
     });
     try { await resetDayExercises(day._dayId); }
     catch { showToast("Error al reiniciar día"); }
   };
 
-  // ─── New week
+  // ─── New week: crea la SIGUIENTE semana (después de la máxima)
   const newWeek = async () => {
-    const next = currentWeekNum + 1;
+    const next = maxWeekNum + 1;
+    // Calcular el lunes de la nueva semana: lunes de esta semana + 7*diferencia
+    const todayMon = getCurrentWeekMonday();
+    // La nueva semana empieza 7*(next - realWeekNum) días después del lunes actual
+    const newMon = new Date(todayMon);
+    newMon.setDate(newMon.getDate() + 7 * (next - realWeekNum));
+    const newMonStr = newMon.toISOString().slice(0, 10);
     setLoading(true);
     try {
-      const prevWeights = buildPrevWeights(weekData);
+      // Usar los pesos de la semana máxima actual
+      const prevWkData = weeks[maxWeekNum];
+      const prevWeights = buildPrevWeights(prevWkData);
       const template = buildFullTemplate(schedule, prevWeights);
-      const wd = await createFullWeek(user.id, next, schedule, template);
-      setWeeks(prev => ({ ...prev, [next]: mergeWithTemplate(wd) }));
-      setCurrentWeekNum(next);
-      setActiveDay(DAY_ORDER[0]);
+      const wd = await createFullWeek(user.id, next, schedule, template, newMonStr);
+      wd.week_start_date = newMonStr;
+      const merged = mergeWithTemplate(wd);
+      merged.week_start_date = newMonStr;
+      setWeeks(prev => ({ ...prev, [next]: merged }));
+      setMaxWeekNum(next);
+      setViewedWeekNum(next);
       showToast(`Semana ${next} creada con pesos heredados ✓`, "info");
     } catch (err) {
       showToast("Error al crear semana: " + err.message);
@@ -638,36 +689,30 @@ export default function Apex({ user, onSignOut }) {
     if (wk?._weekId) {
       try {
         await updateWeekSchedule(wk._weekId, newSched);
-        updateLocal(w => { if (w[currentWeekNum]) w[currentWeekNum].schedule = newSched; });
+        updateLocal(w => { if (w[trackerWeekNum]) w[trackerWeekNum].schedule = newSched; });
       } catch { showToast("Error al cambiar horario"); }
     }
   };
 
-  // ─── Navigate weeks
+  // ─── Navigate weeks en la VISTA SEMANA (NO cambia el tracker)
   const navWeek = async (dir) => {
-    const next = currentWeekNum + dir;
+    const next = viewedWeekNum + dir;
     if (next < 1) return;
-    if (!weeks[next] && dir > 0) {
-      setLoading(true);
-      try {
-        const prevWk = weeks[currentWeekNum];
-        const prevWeights = buildPrevWeights(prevWk);
-        const template = buildFullTemplate(schedule, prevWeights);
-        const wd = await createFullWeek(user.id, next, schedule, template);
-        setWeeks(prev => ({ ...prev, [next]: mergeWithTemplate(wd) }));
-        setCurrentWeekNum(next);
-      } catch {
-        showToast("Error al crear semana");
-      } finally {
-        setLoading(false);
-      }
-    } else if (weeks[next]) {
-      setCurrentWeekNum(next);
-    }
+    // Solo permitir avanzar hasta maxWeekNum (no crear semanas desde aquí)
+    if (next > maxWeekNum) return;
+    setViewedWeekNum(next);
   };
 
+  // getProgress para el TRACKER (semana del tracker)
   const getProgress = (dayId) => {
     const exs = weekData?.days?.[dayId]?.exercises || [];
+    if (!exs.length) return 0;
+    return Math.round(exs.filter(e => e.done).length / exs.length * 100);
+  };
+
+  // getProgressViewed para la VISTA SEMANA (semana navegada)
+  const getProgressViewed = (dayId) => {
+    const exs = weekDataViewed?.days?.[dayId]?.exercises || [];
     if (!exs.length) return 0;
     return Math.round(exs.filter(e => e.done).length / exs.length * 100);
   };
@@ -678,8 +723,16 @@ export default function Apex({ user, onSignOut }) {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   };
-  // Get the date key for a day in the current week (relative to today)
+  // Obtiene la fecha de un día de la semana del TRACKER, usando week_start_date si está disponible
   const getDayKey = (dayIdx) => {
+    const wsd = weekData?.week_start_date; // YYYY-MM-DD del lunes de esa semana
+    if (wsd) {
+      const mon = new Date(wsd + 'T00:00:00'); // lunes de la semana del tracker
+      const d = new Date(mon);
+      d.setDate(mon.getDate() + dayIdx);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    // Fallback: relativo a hoy
     const todayLocal = new Date();
     const todayDayIdx = todayLocal.getDay() === 0 ? 6 : todayLocal.getDay() - 1;
     const diff = dayIdx - todayDayIdx;
@@ -728,7 +781,22 @@ export default function Apex({ user, onSignOut }) {
     }, 0);
   };
 
-  const weeklyVolume = RESISTANCE_DAYS.reduce((acc, d) => acc + calcDayVolume(d), 0);
+  // weeklyVolume: volumen de la semana VISTA (vista Semana)
+  const calcDayVolumeForWeek = (dayKey, wkData) => {
+    const exs = wkData?.days?.[dayKey]?.exercises || [];
+    return exs.reduce((sum, ex) => {
+      const w = parseFloat(ex.weight);
+      if (!w || isNaN(w) || ex.weight === '—') return sum;
+      const sched = wkData?.schedule || schedule;
+      const tmplReps = getTemplateRepsFromPool(dayKey, ex.name, sched);
+      const repsStr = ex.reps || tmplReps || '';
+      const parsed = parseRepsString(repsStr);
+      if (!parsed) return sum;
+      const mult = bilateralMap[ex.name] ? 2 : 1;
+      return sum + w * parsed.sets * parsed.reps * mult;
+    }, 0);
+  };
+  const weeklyVolume = RESISTANCE_DAYS.reduce((acc, d) => acc + calcDayVolumeForWeek(d, weekDataViewed), 0);
   const fmtVolume = (kg) => {
     if (kg === 0) return '0';
     if (kg >= 1000) return `${(kg / 1000).toFixed(1).replace('.', ',')} t`;
@@ -1453,6 +1521,7 @@ export default function Apex({ user, onSignOut }) {
     const ringR   = 26;
     const ringC   = 2 * Math.PI * ringR;
     const ringOff = ringC - (pct / 100) * ringC;
+    const isViewingPastWeekInTracker = trackerWeekNum !== realWeekNum;
 
     return (
       <>
@@ -1464,12 +1533,40 @@ export default function Apex({ user, onSignOut }) {
           </div>
         </div>
 
+        {/* Banner de semana pasada */}
+        {isViewingPastWeekInTracker && (
+          <div style={{
+            margin: '8px 20px 0', padding: '10px 14px',
+            background: '#FFF8E7', border: '1px solid #F5C842',
+            borderRadius: 10, display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', gap: 10,
+          }}>
+            <span style={{ fontSize: 12, color: '#8B6914', fontFamily: 'DM Sans' }}>
+              ✏️ Editando <strong>semana {trackerWeekNum}</strong> — semana pasada
+            </span>
+            <button
+              style={{
+                fontSize: 11, color: '#8B6914', background: 'transparent',
+                border: '1px solid #F5C842', borderRadius: 20, padding: '3px 10px',
+                cursor: 'pointer', fontFamily: 'DM Sans', whiteSpace: 'nowrap',
+              }}
+              onClick={() => {
+                setTrackerWeekNum(realWeekNum);
+                setActiveDay(DAY_ORDER[TODAY_IDX]);
+              }}
+            >
+              volver a hoy
+            </button>
+          </div>
+        )}
+
         <div className="day-strip">
           {DAY_ORDER.map((d, idx) => {
             const p = getProgress(d);
             const dayKey = getDayKey(idx);
             const creatineTaken = !!creatine[dayKey];
-            const isToday = idx === TODAY_IDX;
+            // isToday solo si estamos en la semana real
+            const isToday = !isViewingPastWeekInTracker && idx === TODAY_IDX;
             // Get day-of-month number from the dayKey (YYYY-MM-DD)
             const dayNum = parseInt(dayKey.split('-')[2], 10);
             return (
@@ -1496,7 +1593,7 @@ export default function Apex({ user, onSignOut }) {
             <div>
               <div className="day-title">{dayData?.name}</div>
               <div className="day-meta">
-                {dayData?.label} · {dayData?.type} · S{currentWeekNum}
+                {dayData?.label} · {dayData?.type} · S{trackerWeekNum}
                 {(() => {
                   const activeDayIdx = DAY_ORDER.indexOf(activeDay);
                   const dk = getDayKey(activeDayIdx);
@@ -1589,7 +1686,12 @@ export default function Apex({ user, onSignOut }) {
   };
 
   // ─── RENDER WEEK ──────────────────────────────────────────────────────────
-  const renderWeek = () => (
+  const renderWeek = () => {
+    const isViewingCurrentWeek = viewedWeekNum === realWeekNum;
+    const isViewingFutureWeek = viewedWeekNum > realWeekNum;
+    const isViewingPastWeek = viewedWeekNum < realWeekNum;
+
+    return (
     <>
       <div className="top-bar">
         <div className="top-logo">apex</div>
@@ -1600,13 +1702,45 @@ export default function Apex({ user, onSignOut }) {
       </div>
       <div className="week-body">
         <div className="week-nav">
-          <button className="week-nav-btn" onClick={() => navWeek(-1)}>‹</button>
-          <div>
-            <div className="week-nav-label">Semana {currentWeekNum}</div>
-            <div className="week-nav-sub">horario {weekData?.schedule} · {weekData?.date}</div>
+          <button className="week-nav-btn" onClick={() => navWeek(-1)}
+            style={{ opacity: viewedWeekNum <= 1 ? 0.3 : 1 }}>‹</button>
+          <div style={{ flex: 1, textAlign: 'center' }}>
+            <div className="week-nav-label">
+              Semana {viewedWeekNum}
+              {isViewingCurrentWeek && (
+                <span style={{ marginLeft: 8, fontSize: 10, background: '#1A1917', color: '#F0EDE8',
+                  borderRadius: 20, padding: '2px 8px', fontFamily: 'DM Mono', verticalAlign: 'middle' }}>actual</span>
+              )}
+              {isViewingPastWeek && (
+                <span style={{ marginLeft: 8, fontSize: 10, background: '#C8C4BE', color: '#1A1917',
+                  borderRadius: 20, padding: '2px 8px', fontFamily: 'DM Mono', verticalAlign: 'middle' }}>pasada</span>
+              )}
+            </div>
+            <div className="week-nav-sub">horario {weekDataViewed?.schedule} · {weekDataViewed?.week_start_date || weekDataViewed?.date}</div>
           </div>
-          <button className="week-nav-btn" onClick={() => navWeek(1)}>›</button>
+          <button className="week-nav-btn" onClick={() => navWeek(1)}
+            style={{ opacity: viewedWeekNum >= maxWeekNum ? 0.3 : 1 }}>›</button>
         </div>
+
+        {/* Botón para ir al tracker de esta semana */}
+        {!isViewingCurrentWeek && (
+          <button
+            style={{
+              width: '100%', marginBottom: 16, padding: '10px 14px',
+              background: 'transparent', border: '1.5px solid var(--text)',
+              borderRadius: 12, fontSize: 13, cursor: 'pointer',
+              fontFamily: 'DM Sans', color: 'var(--text)', display: 'flex',
+              alignItems: 'center', justifyContent: 'center', gap: 8,
+            }}
+            onClick={() => {
+              setTrackerWeekNum(viewedWeekNum);
+              setActiveDay(DAY_ORDER[TODAY_IDX]);
+              setScreen('tracker');
+            }}
+          >
+            ✏️ Editar semana {viewedWeekNum} en tracker
+          </button>
+        )}
 
         <div className="stats-row">
           <div className="stat-card">
@@ -1614,7 +1748,7 @@ export default function Apex({ user, onSignOut }) {
             <div className="stat-lbl">días ✓</div>
           </div>
           <div className="stat-card">
-            <div className="stat-num">{DAY_ORDER.reduce((a, d) => a + (weekData?.days?.[d]?.exercises || []).filter(e => e.done).length, 0)}</div>
+            <div className="stat-num">{DAY_ORDER.reduce((a, d) => a + (weekDataViewed?.days?.[d]?.exercises || []).filter(e => e.done).length, 0)}</div>
             <div className="stat-lbl">ejercicios</div>
           </div>
           <div className="stat-card">
@@ -1623,9 +1757,9 @@ export default function Apex({ user, onSignOut }) {
           </div>
         </div>
 
-        {/* ── VTL CARD ── */}
+        {/* ── VTL CARD — calcula sobre la semana VISTA ── */}
         {(() => {
-          const dayVols = RESISTANCE_DAYS.map(d => ({ d, vol: calcDayVolume(d) }));
+          const dayVols = RESISTANCE_DAYS.map(d => ({ d, vol: calcDayVolumeForWeek(d, weekDataViewed) }));
           const maxVol = Math.max(...dayVols.map(x => x.vol), 1);
           const labels = { lun: 'Lun', mie: 'Mié', sab: 'Sáb' };
           return (
@@ -1634,7 +1768,7 @@ export default function Apex({ user, onSignOut }) {
                 <div className="vtl-label">Volumen semanal</div>
                 <div className="vtl-value">{fmtVolume(weeklyVolume)}</div>
                 <div className="vtl-sub">
-                  {weeklyVolume === 0 ? 'agrega pesos para calcular' : 'kg totales levantados · fuerza'}
+                  {weeklyVolume === 0 ? 'sin pesos registrados aún' : 'kg totales levantados · fuerza'}
                 </div>
               </div>
               <div className="vtl-breakdown">
@@ -1654,12 +1788,16 @@ export default function Apex({ user, onSignOut }) {
         })()}
 
         {DAY_ORDER.map(d => {
-          const dd  = weekData?.days?.[d];
-          const p   = getProgress(d);
+          const dd  = weekDataViewed?.days?.[d];
+          const p   = getProgressViewed(d);
           const exs = dd?.exercises || [];
           return (
             <div key={d} className="day-card"
-              onClick={() => { setActiveDay(d); setScreen("tracker"); }}>
+              onClick={() => {
+                setTrackerWeekNum(viewedWeekNum);
+                setActiveDay(d);
+                setScreen('tracker');
+              }}>
               <div className="day-card-top">
                 <div className="day-card-name">{dd?.label} — {dd?.name}</div>
                 <div className="day-card-pct">{p}%</div>
@@ -1673,12 +1811,16 @@ export default function Apex({ user, onSignOut }) {
           );
         })}
 
-        <button className="new-week-btn" onClick={newWeek}>
-          Comenzar semana {currentWeekNum + 1} →
-        </button>
+        {/* Solo mostrar "nueva semana" si estamos viendo la semana máxima */}
+        {viewedWeekNum === maxWeekNum && (
+          <button className="new-week-btn" onClick={newWeek}>
+            Comenzar semana {maxWeekNum + 1} →
+          </button>
+        )}
       </div>
     </>
-  );
+    );
+  };
 
 
   // ─── RENDER PROGRESS ──────────────────────────────────────────────────────
@@ -1979,6 +2121,19 @@ export default function Apex({ user, onSignOut }) {
     { id: "progress", icon: "↗", label: "progreso" },
   ];
 
+  const handleNavClick = (id) => {
+    if (id === 'tracker') {
+      // Al ir a "hoy", siempre volver a la semana real actual
+      setTrackerWeekNum(realWeekNum);
+      setActiveDay(DAY_ORDER[TODAY_IDX]);
+    }
+    if (id === 'week') {
+      // Al ir a la vista Semana, mostrar la semana real por defecto
+      setViewedWeekNum(realWeekNum);
+    }
+    setScreen(id);
+  };
+
   return (
     <>
       <style>{css}</style>
@@ -1991,7 +2146,7 @@ export default function Apex({ user, onSignOut }) {
         <div className="nav-bar">
           {NAV.map(n => (
             <div key={n.id} className={`nav-item ${screen === n.id ? "active" : ""}`}
-              onClick={() => setScreen(n.id)}>
+              onClick={() => handleNavClick(n.id)}>
               <span className="nav-icon" style={{ opacity: screen === n.id ? 1 : 0.3 }}>{n.icon}</span>
               <span className="nav-lbl">{n.label}</span>
               <div className="nav-dot" />

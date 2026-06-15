@@ -34,11 +34,13 @@ export async function getWeeks(profileId) {
   return data
 }
 
-export async function upsertWeek(profileId, weekNumber, schedule, date) {
+export async function upsertWeek(profileId, weekNumber, schedule, date, weekStartDate) {
+  const payload = { profile_id: profileId, week_number: weekNumber, schedule, date }
+  if (weekStartDate) payload.week_start_date = weekStartDate
   const { data, error } = await supabase
     .from('weeks')
     .upsert(
-      { profile_id: profileId, week_number: weekNumber, schedule, date },
+      payload,
       { onConflict: 'profile_id,week_number' }
     )
     .select()
@@ -185,6 +187,7 @@ export async function loadAllData(userId) {
       _weekId: week.id,
       schedule: week.schedule,
       date: week.date,
+      week_start_date: week.week_start_date || null,
       days,
     }
   }
@@ -192,13 +195,33 @@ export async function loadAllData(userId) {
   const maxWeek = Math.max(...weeksRaw.map(w => w.week_number))
   const currentSchedule = weeksRaw.find(w => w.week_number === maxWeek)?.schedule || 'A'
 
-  return { currentWeekNum: maxWeek, schedule: currentSchedule, weeks: result }
+  return { maxWeekNum: maxWeek, schedule: currentSchedule, weeks: result }
 }
 
-export async function createFullWeek(userId, weekNumber, schedule, template) {
+// Returns ISO string for Monday of the current week
+export function getCurrentWeekMonday() {
+  const today = new Date()
+  const d = today.getDay() // 0=Sun
+  const diff = d === 0 ? -6 : 1 - d // days back to Monday
+  const mon = new Date(today)
+  mon.setDate(today.getDate() + diff)
+  mon.setHours(0, 0, 0, 0)
+  return mon.toISOString().slice(0, 10) // YYYY-MM-DD
+}
+
+// Returns Monday of week N given week 1 started on baseMonday
+export function getWeekMondayByNum(weekNum, allWeeks) {
+  // Try to find the week's stored start date
+  const wk = Object.values(allWeeks || {}).find(w => w._weekNum === weekNum)
+  if (wk?.week_start_date) return wk.week_start_date
+  return null
+}
+
+export async function createFullWeek(userId, weekNumber, schedule, template, explicitMonday) {
   const DAY_ORDER = ['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom']
+  const weekStartDate = explicitMonday || getCurrentWeekMonday()
   const date = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })
-  const week = await upsertWeek(userId, weekNumber, schedule, date)
+  const week = await upsertWeek(userId, weekNumber, schedule, date, weekStartDate)
 
   const weekDays = {}
 
