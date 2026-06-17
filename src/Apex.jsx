@@ -169,6 +169,86 @@ const DAY_ORDER = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"];
 const _localDay = new Date().getDay(); // 0=Sun,1=Mon,…,6=Sat
 const TODAY_IDX = _localDay === 0 ? 6 : _localDay - 1;
 
+// ─── MUSCLE GROUP CLASSIFICATION ─────────────────────────────────────────────
+// Keywords are matched against the exercise `muscle` field (case-insensitive).
+// Order matters — first match wins.
+const MUSCLE_GROUPS_DEF = [
+  {
+    id: 'chest_tri',
+    label: 'Pecho & Tríceps',
+    emoji: '💪',
+    color: '#E8F4FF',
+    accent: '#2563EB',
+    keywords: ['pecho','pectoral','press','fly','flye','tricep','trícep','dip','pushdown','overhead ext','pushup'],
+    days: ['mie'],
+  },
+  {
+    id: 'back_bi',
+    label: 'Espalda & Bíceps',
+    emoji: '🏋️',
+    color: '#F0FDF4',
+    accent: '#16A34A',
+    keywords: ['espalda','back','pull','row','curl','bícep','bicep','chin','lat','deadlift','rdl','romanian','seated cable'],
+    days: ['mie'],
+  },
+  {
+    id: 'legs',
+    label: 'Piernas',
+    emoji: '🦵',
+    color: '#FFF7ED',
+    accent: '#EA580C',
+    keywords: ['pierna','leg','squat','lunge','quad','cuádrices','cuádricep','hamstring','isquio','pantorrilla','calf','gluteo','glúteo','hip','tibialis','tibiale'],
+    days: ['lun'],
+  },
+  {
+    id: 'shoulders',
+    label: 'Hombros',
+    emoji: '🔺',
+    color: '#FFF1F2',
+    accent: '#E11D48',
+    keywords: ['hombro','shoulder','lateral raise','deltoid','overhead press','eye level','facepull'],
+    days: ['mie'],
+  },
+  {
+    id: 'core',
+    label: 'Core',
+    emoji: '⚡',
+    color: '#FEFCE8',
+    accent: '#CA8A04',
+    keywords: ['core','abs','abdominal','plank','crunch','twist','russian','leg raise','dead bug','v-up','bicicleta'],
+    days: ['lun','mie','sab'],
+  },
+  {
+    id: 'cardio',
+    label: 'Cardio',
+    emoji: '❤️',
+    color: '#FDF4FF',
+    accent: '#A21CAF',
+    keywords: ['cardio','zona','hiit','trote','bici','remo','natación','caminata','running','sprint','aeróbico','recuperación'],
+    days: ['mar','jue','vie','dom'],
+  },
+];
+
+// Returns the group definition for a given muscle string
+const classifyMuscleGroup = (muscleStr) => {
+  if (!muscleStr) return null;
+  const lower = muscleStr.toLowerCase();
+  for (const grp of MUSCLE_GROUPS_DEF) {
+    if (grp.keywords.some(kw => lower.includes(kw))) return grp;
+  }
+  return null;
+};
+
+// Returns the group definition for a given exercise name (fallback for templates)
+const classifyByName = (nameStr) => {
+  if (!nameStr) return null;
+  const lower = nameStr.toLowerCase();
+  for (const grp of MUSCLE_GROUPS_DEF) {
+    if (grp.keywords.some(kw => lower.includes(kw))) return grp;
+  }
+  return null;
+};
+
 // ─── GET EXERCISES BY SCHEDULE ────────────────────────────────────────────────
 const getExercisesForDay = (dayKey, scheduleStr) => {
   if (RESISTANCE_DAYS.includes(dayKey)) {
@@ -382,6 +462,9 @@ export default function Apex({ user, onSignOut }) {
   const [toast, setToast]         = useState(null);
   const [protocolOpen, setProtocolOpen] = useState(true);
   const [progressTab, setProgressTab]   = useState("calendar");
+  // protocol modal: pending schedule change requiring confirmation
+  const [showProtocolModal, setShowProtocolModal] = useState(false);
+  const [pendingSchedule, setPendingSchedule]     = useState(null);
   // creatine: { "2026-06-03": true, … }
   const [creatine, setCreatine]     = useState(loadCreatine);
   // bilateral: { "Lateral Raise": true, … } — stored in localStorage, keyed by exercise name
@@ -679,11 +762,27 @@ export default function Apex({ user, onSignOut }) {
     }
   };
 
-  // ─── Toggle schedule A/B (with advisory)
+  // ─── Toggle schedule A/B: if the week already has a schedule locked, show a disclaimer first
   const toggleSchedule = async () => {
     const newSched = schedule === "A" ? "B" : "A";
+    // Check if the current week already has an explicitly set schedule
+    const wk = weekData;
+    const isLocked = !!(wk && (wk.schedule === 'A' || wk.schedule === 'B'));
+    if (isLocked) {
+      // Show disclaimer modal instead of changing immediately
+      setPendingSchedule(newSched);
+      setShowProtocolModal(true);
+      return;
+    }
+    await applyScheduleChange(newSched);
+  };
+
+  // Called after user confirms the modal
+  const applyScheduleChange = async (newSched) => {
     const label = newSched === "A" ? "A · Fuerza (4–8 reps)" : "B · Hipertrofia (8–15 reps)";
     setSchedule(newSched);
+    setShowProtocolModal(false);
+    setPendingSchedule(null);
     showToast(`Horario ${label} — aplica a toda la semana`, "info");
     const wk = weekData;
     if (wk?._weekId) {
@@ -835,7 +934,13 @@ export default function Apex({ user, onSignOut }) {
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
 
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    body { background: #F0EDE8; }
+    html, body {
+      background: #F0EDE8 !important;
+      color: #1A1917 !important;
+      color-scheme: light only;
+      overscroll-behavior: none;
+    }
+    *, *::before, *::after { color-scheme: light only; }
 
     :root {
       --bg: #F0EDE8;
@@ -889,7 +994,11 @@ export default function Apex({ user, onSignOut }) {
     @keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 
     /* ── TOP BAR ── */
-    .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 20px 20px 0; }
+    .top-bar {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: calc(env(safe-area-inset-top, 14px) + 14px) 20px 0;
+      background: #F0EDE8;
+    }
     .top-logo { font-size: 22px; font-weight: 300; letter-spacing: -1px; color: var(--text); }
     .top-right { display: flex; align-items: center; gap: 10px; }
     .top-name { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
@@ -1324,6 +1433,221 @@ export default function Apex({ user, onSignOut }) {
     .cat-bar-bg { flex: 1; width: 100%; background: var(--pill); border-radius: 3px; overflow: hidden; display: flex; align-items: flex-end; }
     .cat-bar-fill { width: 100%; border-radius: 3px; transition: height 0.4s; min-height: 2px; }
     .cat-bar-lbl { font-size: 7px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+    /* ── PROTOCOL LOCK BADGE ── */
+    .sched-locked-row {
+      display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;
+    }
+    .sched-locked-badge {
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--text); border-radius: 14px; padding: 12px 16px;
+    }
+    .sched-locked-left { display: flex; flex-direction: column; gap: 3px; }
+    .sched-locked-type {
+      font-size: 9px; font-family: 'DM Mono', monospace;
+      color: rgba(240,237,232,0.55); text-transform: uppercase; letter-spacing: 1px;
+    }
+    .sched-locked-label {
+      font-size: 16px; font-weight: 500; color: #F0EDE8; letter-spacing: -0.3px;
+    }
+    .sched-locked-detail {
+      font-size: 11px; font-family: 'DM Mono', monospace; color: rgba(240,237,232,0.6);
+      margin-top: 1px;
+    }
+    .sched-locked-change {
+      font-size: 11px; background: rgba(240,237,232,0.12); color: rgba(240,237,232,0.7);
+      border: 1px solid rgba(240,237,232,0.18); border-radius: 20px;
+      padding: 5px 12px; cursor: pointer; font-family: 'DM Sans', sans-serif;
+      white-space: nowrap; transition: all 0.15s;
+    }
+    .sched-locked-change:active { background: rgba(240,237,232,0.22); }
+    .sched-info-pills { display: flex; gap: 6px; }
+    .sched-info-pill {
+      flex: 1; background: var(--pill); border-radius: 10px; padding: 8px 10px;
+      text-align: center;
+    }
+    .sched-info-pill-val {
+      font-size: 12px; font-weight: 500; font-family: 'DM Mono', monospace; color: var(--text);
+    }
+    .sched-info-pill-lbl {
+      font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace;
+      text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px;
+    }
+
+    /* ── PROTOCOL SELECT (unlocked) ── */
+    .sched-select-row {
+      display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;
+    }
+    .sched-select-label {
+      font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace;
+      text-transform: uppercase; letter-spacing: 0.8px;
+    }
+    .sched-select-pills { display: flex; gap: 8px; }
+    .sched-select-pill {
+      flex: 1; padding: 12px 10px; border-radius: 14px;
+      border: 1.5px solid var(--border); background: var(--surface);
+      cursor: pointer; transition: all 0.2s; text-align: left;
+    }
+    .sched-select-pill.active {
+      background: var(--text); border-color: var(--text);
+    }
+    .sched-select-pill-title {
+      font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 3px;
+    }
+    .sched-select-pill.active .sched-select-pill-title { color: #F0EDE8; }
+    .sched-select-pill-detail {
+      font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted);
+    }
+    .sched-select-pill.active .sched-select-pill-detail { color: rgba(240,237,232,0.6); }
+
+    /* ── PROTOCOL CHANGE MODAL ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(26,25,23,0.55);
+      backdrop-filter: blur(4px); z-index: 500;
+      display: flex; align-items: flex-end; justify-content: center;
+      padding-bottom: 24px; animation: fadeIn 0.2s ease;
+    }
+    .modal-sheet {
+      background: var(--surface); border-radius: 24px 24px 20px 20px;
+      width: 100%; max-width: 430px; padding: 28px 24px 24px;
+      animation: slideUp 0.25s cubic-bezier(0.16,1,0.3,1);
+    }
+    @keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .modal-handle { width: 36px; height: 4px; border-radius: 2px; background: var(--border); margin: 0 auto 20px; }
+    .modal-icon { font-size: 28px; margin-bottom: 12px; }
+    .modal-title { font-size: 20px; font-weight: 500; color: var(--text); letter-spacing: -0.5px; margin-bottom: 8px; }
+    .modal-desc { font-size: 13px; color: var(--muted); line-height: 1.65; margin-bottom: 20px; font-family: 'DM Sans', sans-serif; }
+    .modal-warning {
+      background: #FFF8E7; border: 1px solid #F5C842; border-radius: 12px;
+      padding: 12px 14px; margin-bottom: 20px;
+      font-size: 12px; color: #8B6914; line-height: 1.55; font-family: 'DM Sans', sans-serif;
+    }
+    .modal-actions { display: flex; gap: 8px; }
+    .modal-cancel {
+      flex: 1; padding: 13px 0; background: var(--pill); color: var(--muted);
+      border: none; border-radius: 14px; font-size: 14px;
+      cursor: pointer; font-family: 'DM Sans', sans-serif;
+    }
+    .modal-confirm {
+      flex: 2; padding: 13px 0; background: var(--text); color: var(--bg);
+      border: none; border-radius: 14px; font-size: 14px; font-weight: 500;
+      cursor: pointer; font-family: 'DM Sans', sans-serif;
+    }
+
+    /* ── OVERLOAD TAB ── */
+    .ol-science-card {
+      background: var(--text); border-radius: 18px; padding: 20px 18px; margin-bottom: 16px;
+    }
+    .ol-science-label {
+      font-size: 9px; font-family: 'DM Mono', monospace; color: rgba(240,237,232,0.45);
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;
+    }
+    .ol-science-title {
+      font-size: 20px; font-weight: 300; color: #F0EDE8; letter-spacing: -0.5px; margin-bottom: 8px;
+    }
+    .ol-science-desc {
+      font-size: 12px; color: rgba(240,237,232,0.6); line-height: 1.7;
+      font-family: 'DM Sans', sans-serif;
+    }
+    .ol-methods { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+    .ol-method-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 14px 16px;
+      display: flex; align-items: flex-start; gap: 14px;
+    }
+    .ol-method-icon { font-size: 22px; flex-shrink: 0; margin-top: 1px; }
+    .ol-method-body { flex: 1; min-width: 0; }
+    .ol-method-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 3px; }
+    .ol-method-desc { font-size: 12px; color: var(--muted); line-height: 1.6; font-family: 'DM Sans', sans-serif; }
+    .ol-method-tag {
+      display: inline-block; font-size: 9px; font-family: 'DM Mono', monospace;
+      background: var(--pill); color: var(--muted); border-radius: 6px;
+      padding: 2px 7px; margin-top: 5px; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .ol-rules-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 18px; margin-bottom: 16px;
+    }
+    .ol-rules-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 12px; }
+    .ol-rules-list { display: flex; flex-direction: column; gap: 10px; }
+    .ol-rule-row { display: flex; align-items: flex-start; gap: 10px; }
+    .ol-rule-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text); flex-shrink: 0; margin-top: 5px; }
+    .ol-rule-text { font-size: 12px; color: var(--muted); line-height: 1.6; font-family: 'DM Sans', sans-serif; }
+    .ol-rule-text strong { color: var(--text); font-weight: 500; }
+
+    .ol-table-title { font-size: 16px; font-weight: 500; color: var(--text); margin-bottom: 12px; letter-spacing: -0.3px; }
+    .ol-table-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; overflow: hidden; margin-bottom: 16px;
+    }
+    .ol-table-header {
+      display: grid; grid-template-columns: 1fr 72px 72px 52px;
+      background: var(--pill); padding: 10px 14px;
+      font-size: 9px; font-family: 'DM Mono', monospace; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .ol-table-row {
+      display: grid; grid-template-columns: 1fr 72px 72px 52px;
+      padding: 12px 14px; border-top: 1px solid var(--border);
+      align-items: center;
+    }
+    .ol-table-name { font-size: 13px; font-weight: 500; color: var(--text); }
+    .ol-table-name-sub { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 1px; }
+    .ol-table-val { font-size: 13px; font-family: 'DM Mono', monospace; color: var(--text); }
+    .ol-table-trend { font-size: 14px; font-weight: 600; }
+    .ol-trend-up   { color: #16A34A; }
+    .ol-trend-same { color: var(--muted); }
+    .ol-trend-down { color: #DC2626; }
+    .ol-trend-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; font-family: 'DM Mono', monospace;
+      border-radius: 6px; padding: 2px 7px;
+    }
+    .ol-trend-badge.up   { background: #F0FDF4; color: #16A34A; }
+    .ol-trend-badge.same { background: var(--pill); color: var(--muted); }
+    .ol-trend-badge.down { background: #FEF2F2; color: #DC2626; }
+    .ol-no-data { text-align: center; padding: 32px 20px; font-size: 13px; color: var(--muted); line-height: 1.8; }
+
+    /* ── CATEGORY CARDS IMPROVED ── */
+    .cat-card-v2 {
+      border-radius: 18px; padding: 18px; margin-bottom: 10px;
+      border: 1.5px solid var(--border); background: var(--surface);
+    }
+    .cat-hdr-v2 { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .cat-emoji-v2 {
+      font-size: 24px; line-height: 1; width: 44px; height: 44px;
+      border-radius: 12px; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .cat-title-v2 { font-size: 17px; font-weight: 500; color: var(--text); }
+    .cat-subtitle-v2 { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+    .cat-trend-badge {
+      margin-left: auto; display: flex; align-items: center; gap: 4px;
+      font-size: 11px; font-family: 'DM Mono', monospace;
+      border-radius: 8px; padding: 4px 9px; font-weight: 500; flex-shrink: 0;
+    }
+    .cat-trend-badge.up   { background: #F0FDF4; color: #16A34A; }
+    .cat-trend-badge.same { background: var(--pill); color: var(--muted); }
+    .cat-trend-badge.down { background: #FEF2F2; color: #DC2626; }
+    .cat-stats-v2 {
+      display: flex; gap: 0;
+      background: var(--pill); border-radius: 12px; overflow: hidden;
+      margin-bottom: 14px;
+    }
+    .cat-stat-v2 { flex: 1; text-align: center; padding: 12px 8px; border-right: 1px solid var(--border); }
+    .cat-stat-v2:last-child { border-right: none; }
+    .cat-val-v2 { font-size: 20px; font-weight: 300; letter-spacing: -0.5px; color: var(--text); line-height: 1; }
+    .cat-lbl-v2 { font-size: 8px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .cat-bars-v2 { display: flex; gap: 3px; align-items: flex-end; height: 40px; margin-bottom: 14px; }
+    .cat-bar-col-v2 { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; height: 100%; }
+    .cat-bar-bg-v2 { flex: 1; width: 100%; background: var(--pill); border-radius: 3px; overflow: hidden; display: flex; align-items: flex-end; }
+    .cat-bar-fill-v2 { width: 100%; border-radius: 3px; transition: height 0.4s; min-height: 2px; }
+    .cat-bar-lbl-v2 { font-size: 7px; color: var(--muted); font-family: 'DM Mono', monospace; }
+    .cat-ex-list { display: flex; flex-direction: column; gap: 0; border-top: 1px solid var(--border); }
+    .cat-ex-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--border); }
+    .cat-ex-row:last-child { border-bottom: none; }
+    .cat-ex-name { font-size: 13px; color: var(--text); }
+    .cat-ex-weight { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); }
   `;
 
   // ─── LOADING STATE ────────────────────────────────────────────────────────
@@ -1614,16 +1938,72 @@ export default function Apex({ user, onSignOut }) {
             </svg>
           </div>
 
-          {/* Schedule A/B — informative with week-wide advisory */}
-          <div className="schedule-row">
-            <button className={`sched-pill ${schedule === "A" ? "active" : ""}`} onClick={toggleSchedule}>
-              A · fuerza
-            </button>
-            <button className={`sched-pill ${schedule === "B" ? "active" : ""}`} onClick={toggleSchedule}>
-              B · hipertrofia
-            </button>
-            {dayData?.warmup && <span className="warmup-tag">calentamiento 10 min</span>}
-          </div>
+          {/* Schedule A/B — locked badge when week has a protocol, selection pills when new */}
+          {(() => {
+            const wkSched = weekData?.schedule || schedule;
+            const isLocked = !!(weekData && (weekData.schedule === 'A' || weekData.schedule === 'B'));
+            const schedDetails = {
+              A: { name: 'Fuerza', sets: '3–4 sets', reps: '4–8 reps', rest: '2–4 min descanso', color: '#1A1917' },
+              B: { name: 'Hipertrofia', sets: '2–3 sets', reps: '8–15 reps', rest: '~90 seg descanso', color: '#1A1917' },
+            };
+            const detail = schedDetails[wkSched];
+            if (isLocked) {
+              return (
+                <div className="sched-locked-row">
+                  <div className="sched-locked-badge">
+                    <div className="sched-locked-left">
+                      <span className="sched-locked-type">Protocolo {wkSched === 'A' ? 'A' : 'B'} · Semana bloqueada</span>
+                      <span className="sched-locked-label">{detail.name}</span>
+                      <span className="sched-locked-detail">{detail.sets} · {detail.reps} · {detail.rest}</span>
+                    </div>
+                    <button className="sched-locked-change" onClick={toggleSchedule}>cambiar</button>
+                  </div>
+                  <div className="sched-info-pills">
+                    <div className="sched-info-pill">
+                      <div className="sched-info-pill-val">{detail.sets}</div>
+                      <div className="sched-info-pill-lbl">Series</div>
+                    </div>
+                    <div className="sched-info-pill">
+                      <div className="sched-info-pill-val">{detail.reps}</div>
+                      <div className="sched-info-pill-lbl">Reps</div>
+                    </div>
+                    <div className="sched-info-pill">
+                      <div className="sched-info-pill-val">{detail.rest.split(' ')[0]}</div>
+                      <div className="sched-info-pill-lbl">Descanso</div>
+                    </div>
+                    {dayData?.warmup && (
+                      <div className="sched-info-pill">
+                        <div className="sched-info-pill-val">10 min</div>
+                        <div className="sched-info-pill-lbl">Calent.</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+            // Unlocked: show selection pills
+            return (
+              <div className="sched-select-row">
+                <span className="sched-select-label">🔒 Elige el protocolo de esta semana</span>
+                <div className="sched-select-pills">
+                  <button
+                    className={`sched-select-pill ${wkSched === 'A' ? 'active' : ''}`}
+                    onClick={() => applyScheduleChange('A')}
+                  >
+                    <div className="sched-select-pill-title">A · Fuerza</div>
+                    <div className="sched-select-pill-detail">3–4 sets · 4–8 reps · 2–4 min</div>
+                  </button>
+                  <button
+                    className={`sched-select-pill ${wkSched === 'B' ? 'active' : ''}`}
+                    onClick={() => applyScheduleChange('B')}
+                  >
+                    <div className="sched-select-pill-title">B · Hipertrofia</div>
+                    <div className="sched-select-pill-detail">2–3 sets · 8–15 reps · ~90s</div>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Protocol context card */}
           {renderProtocolCard()}
@@ -1934,85 +2314,305 @@ export default function Apex({ user, onSignOut }) {
       );
     };
 
-    // ── Categories tab ──────────────────────────────────────────────────
-    const CATS = [
-      { id: 'lower', label: 'Lower Body', emoji: '🦵', desc: 'Piernas · Cuádriceps · Isquiotibiales', days: ['lun'], isRes: true },
-      { id: 'upper', label: 'Upper Body', emoji: '💪', desc: 'Torso · Pecho · Hombros · Espalda', days: ['mie'], isRes: true },
-      { id: 'arms',  label: 'Arms',       emoji: '🏋️', desc: 'Brazos · Bíceps · Tríceps', days: ['sab'], isRes: true },
-      { id: 'cardio',label: 'Cardio',     emoji: '❤️', desc: 'Recuperación · Zona 2 · HIIT · Dom', days: ['mar','jue','vie','dom'], isRes: false },
-    ];
+    // ── Categories tab — improved with muscle group auto-classification ────────
     const renderCatTab = () => {
       const sorted = Object.entries(weeks).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+      const sortedNums = sorted.map(([wn]) => parseInt(wn));
+      const lastTwo = sortedNums.slice(-2);
+
       return (
-        <div className="cat-list">
-          {CATS.map(cat => {
-            let totalDays = 0, doneDays = 0, vol = 0;
-            const bars = [];
+        <div>
+          {MUSCLE_GROUPS_DEF.map(grp => {
+            // Collect all exercises across all weeks that belong to this group
+            let totalDays = 0, doneDays = 0;
+            const weeklyVols = {}; // wn → volume
+            const exLatest = {}; // exName → { weight, wn }
+
             sorted.forEach(([wn, wk]) => {
               let cd = 0, ct = 0;
-              cat.days.forEach(dk => {
+              let wvol = 0;
+              DAY_ORDER.forEach(dk => {
                 const dd = wk.days?.[dk];
                 if (!dd) return;
                 const exs = dd.exercises || [];
-                if (exs.length === 0) return;
-                totalDays++; ct++;
-                const done = exs.filter(e => e.done).length;
-                if (done === exs.length) { doneDays++; cd++; }
-                if (cat.isRes) {
-                  exs.forEach(ex => {
-                    const w = parseFloat(ex.weight);
-                    if (!w || isNaN(w) || ex.weight === '—') return;
-                    const tr = getTemplateRepsFromPool(dk, ex.name, wk.schedule || schedule);
+                // Find exercises that belong to this group (by muscle or name)
+                const matching = exs.filter(ex => {
+                  const byMuscle = classifyMuscleGroup(ex.muscle);
+                  const byName   = classifyByName(ex.name);
+                  return (byMuscle?.id === grp.id) || (!byMuscle && byName?.id === grp.id);
+                });
+                if (matching.length === 0) return;
+                ct++;
+                totalDays++;
+                const doneCount = matching.filter(e => e.done).length;
+                if (doneCount === matching.length) { cd++; doneDays++; }
+                // Volume + latest weights
+                matching.forEach(ex => {
+                  const w = parseFloat(ex.weight);
+                  if (w && !isNaN(w) && ex.weight !== '—') {
+                    const sched = wk.schedule || schedule;
+                    const tr = getTemplateRepsFromPool(dk, ex.name, sched);
                     const parsed = parseRepsString(ex.reps || tr || '');
-                    if (!parsed) return;
-                    vol += w * parsed.sets * parsed.reps * (bilateralMap[ex.name] ? 2 : 1);
-                  });
-                }
+                    if (parsed) {
+                      const v = w * parsed.sets * parsed.reps * (bilateralMap[ex.name] ? 2 : 1);
+                      wvol += v;
+                    }
+                    // Track latest weight per exercise
+                    const existing = exLatest[ex.name];
+                    if (!existing || parseInt(wn) > existing.wn) {
+                      exLatest[ex.name] = { weight: w, wn: parseInt(wn) };
+                    }
+                  }
+                });
               });
-              if (ct > 0) bars.push({ wn, pct: Math.round(cd / ct * 100) });
+              if (ct > 0) weeklyVols[parseInt(wn)] = wvol;
             });
+
+            const bars = sortedNums.map(wn => ({ wn, vol: weeklyVols[wn] || 0 }));
+            const maxVol = Math.max(...bars.map(b => b.vol), 1);
             const avg = totalDays ? Math.round(doneDays / totalDays * 100) : 0;
-            const maxBar = Math.max(...bars.map(b => b.pct), 1);
+            const totalVol = Object.values(weeklyVols).reduce((s, v) => s + v, 0);
+
+            // Trend: compare last 2 weeks volume
+            let trendClass = 'same', trendIcon = '→', trendDelta = '';
+            if (lastTwo.length === 2) {
+              const v1 = weeklyVols[lastTwo[0]] || 0;
+              const v2 = weeklyVols[lastTwo[1]] || 0;
+              if (v2 > v1 + 50) { trendClass = 'up'; trendIcon = '↑'; trendDelta = `+${fmtVolume(v2-v1)}`; }
+              else if (v2 < v1 - 50) { trendClass = 'down'; trendIcon = '↓'; trendDelta = `-${fmtVolume(v1-v2)}`; }
+              else { trendDelta = 'estable'; }
+            }
+
+            // Only show group if it has any data
+            const hasAnyData = totalDays > 0;
+
             return (
-              <div key={cat.id} className="cat-card">
-                <div className="cat-hdr">
-                  <span className="cat-emoji">{cat.emoji}</span>
-                  <div>
-                    <div className="cat-name">{cat.label}</div>
-                    <div className="cat-desc">{cat.desc}</div>
+              <div key={grp.id} className="cat-card-v2">
+                <div className="cat-hdr-v2">
+                  <div className="cat-emoji-v2" style={{ background: grp.color }}>
+                    {grp.emoji}
                   </div>
-                </div>
-                <div className="cat-stats">
-                  <div className="cat-stat">
-                    <div className="cat-val">{doneDays}</div>
-                    <div className="cat-lbl">días ✓</div>
+                  <div style={{ flex: 1 }}>
+                    <div className="cat-title-v2">{grp.label}</div>
+                    <div className="cat-subtitle-v2">{grp.keywords.slice(0, 4).join(' · ')}</div>
                   </div>
-                  <div className="cat-stat">
-                    <div className="cat-val">{avg}%</div>
-                    <div className="cat-lbl">promedio</div>
-                  </div>
-                  {cat.isRes && vol > 0 && (
-                    <div className="cat-stat">
-                      <div className="cat-val cat-val-sm">{fmtVolume(vol)}</div>
-                      <div className="cat-lbl">vol. acum.</div>
+                  {hasAnyData && totalVol > 0 && (
+                    <div className={`cat-trend-badge ${trendClass}`}>
+                      <span>{trendIcon}</span>
+                      <span>{trendDelta}</span>
                     </div>
                   )}
                 </div>
-                {bars.length > 0 && (
-                  <div className="cat-bars">
-                    {bars.map(({ wn, pct }) => (
-                      <div key={wn} className="cat-bar-col">
-                        <div className="cat-bar-bg">
-                          <div className="cat-bar-fill" style={{ height: `${pct / maxBar * 100}%`, background: pct === 100 ? '#1A1917' : '#C8C4BE' }} />
-                        </div>
-                        <span className="cat-bar-lbl">S{wn}</span>
-                      </div>
-                    ))}
+
+                {!hasAnyData ? (
+                  <div style={{ fontSize: 12, color: 'var(--muted)', paddingBottom: 4, fontFamily: 'DM Sans' }}>
+                    Sin datos aún — agrega ejercicios con este grupo muscular.
                   </div>
+                ) : (
+                  <>
+                    <div className="cat-stats-v2">
+                      <div className="cat-stat-v2">
+                        <div className="cat-val-v2">{doneDays}</div>
+                        <div className="cat-lbl-v2">Días ✓</div>
+                      </div>
+                      <div className="cat-stat-v2">
+                        <div className="cat-val-v2">{avg}%</div>
+                        <div className="cat-lbl-v2">Promedio</div>
+                      </div>
+                      {totalVol > 0 && (
+                        <div className="cat-stat-v2">
+                          <div className="cat-val-v2" style={{ fontSize: totalVol > 99999 ? 14 : 20 }}>{fmtVolume(totalVol)}</div>
+                          <div className="cat-lbl-v2">Vol. Total</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {bars.some(b => b.vol > 0) && (
+                      <div className="cat-bars-v2">
+                        {bars.map(({ wn, vol }) => (
+                          <div key={wn} className="cat-bar-col-v2">
+                            <div className="cat-bar-bg-v2">
+                              <div className="cat-bar-fill-v2" style={{
+                                height: maxVol > 0 ? `${(vol / maxVol) * 100}%` : '0%',
+                                background: vol > 0 ? grp.accent : 'var(--border)',
+                                opacity: vol > 0 ? 1 : 0.3,
+                              }} />
+                            </div>
+                            <span className="cat-bar-lbl-v2">S{wn}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {Object.keys(exLatest).length > 0 && (
+                      <div className="cat-ex-list">
+                        {Object.entries(exLatest).map(([name, { weight }]) => (
+                          <div key={name} className="cat-ex-row">
+                            <span className="cat-ex-name">{name}</span>
+                            <span className="cat-ex-weight">{weight > 0 ? `${weight} kg` : '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             );
           })}
+        </div>
+      );
+    };
+
+    // ── Overload tab ─────────────────────────────────────────────────────────
+    const renderOverloadTab = () => {
+      const METHODS = [
+        {
+          icon: '⚖️',
+          title: 'Aumentar el peso',
+          desc: 'Una vez que puedes completar todas las reps con buena forma, agrega 2.5–5% más de peso. Es el método más directo para ganar fuerza.',
+          tag: 'Fuerza · Hipertrofia',
+        },
+        {
+          icon: '🔁',
+          title: 'Aumentar repeticiones',
+          desc: 'Antes de subir el peso, intenta agregar 1–2 reps extra por set. Cuando alcances el techo del rango, sube el peso.',
+          tag: 'Hipertrofia',
+        },
+        {
+          icon: '📦',
+          title: 'Agregar un set',
+          desc: 'Si el peso y reps se estancaron, añade un set extra al ejercicio. Aumenta el volumen total sin cambiar la intensidad.',
+          tag: 'Volumen',
+        },
+        {
+          icon: '🐢',
+          title: 'Tempo excéntrico',
+          desc: 'Baja la carga en 3–4 segundos (fase excéntrica). Aumenta la tensión mecánica y el tiempo bajo tensión sin subir el peso.',
+          tag: 'Calidad · Hipertrofia',
+        },
+        {
+          icon: '⏱',
+          title: 'Reducir descanso',
+          desc: 'Acorta el descanso entre sets de forma gradual (ej: de 3 min a 2 min). El mismo volumen en menos tiempo = mayor estrés metabólico.',
+          tag: 'Resistencia muscular',
+        },
+      ];
+
+      const RULES = [
+        { text: <><strong>No más del 10%</strong> de aumento semanal en cualquier variable para evitar lesiones.</> },
+        { text: <><strong>Principiantes:</strong> pueden subir peso en cada sesión. El progreso es rápido en las primeras semanas.</> },
+        { text: <><strong>Intermedios:</strong> progreso cada 1–2 semanas. El cuerpo tarda más en adaptarse.</> },
+        { text: <><strong>Avanzados:</strong> mensual o con periodización. Usa ciclos de volumen y fuerza.</> },
+        { text: <>Si te estancas más de 2–3 semanas, revisa <strong>sueño, proteína y estrés</strong> antes de cambiar el entrenamiento.</> },
+        { text: <>Una semana de <strong>deload</strong> (reducir volumen/intensidad 40%) cada 4–6 semanas permite supercompensación.</> },
+      ];
+
+      // Build per-exercise overload data: { name, group, lastWeight, prevWeight, weekNum }
+      const sortedWks = Object.entries(weeks).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+      const exWeightHistory = {}; // exName → [{ wn, weight }]
+      sortedWks.forEach(([wn, wk]) => {
+        DAY_ORDER.forEach(dk => {
+          (wk.days?.[dk]?.exercises || []).forEach(ex => {
+            const w = parseFloat(ex.weight);
+            if (!w || isNaN(w) || ex.weight === '—') return;
+            if (!exWeightHistory[ex.name]) exWeightHistory[ex.name] = [];
+            exWeightHistory[ex.name].push({ wn: parseInt(wn), weight: w });
+          });
+        });
+      });
+
+      const olRows = Object.entries(exWeightHistory)
+        .map(([name, history]) => {
+          const last = history[history.length - 1];
+          const prev = history.length > 1 ? history[history.length - 2] : null;
+          const delta = prev ? last.weight - prev.weight : null;
+          const grp = classifyMuscleGroup(
+            Object.values(weeks).flatMap(wk =>
+              DAY_ORDER.flatMap(dk => (wk.days?.[dk]?.exercises || []))
+            ).find(e => e.name === name)?.muscle || ''
+          ) || classifyByName(name);
+          return { name, lastWeight: last.weight, prevWeight: prev?.weight, delta, wn: last.wn, grp };
+        })
+        .sort((a, b) => (a.grp?.label || 'z').localeCompare(b.grp?.label || 'z'));
+
+      return (
+        <div>
+          {/* Science card */}
+          <div className="ol-science-card">
+            <div className="ol-science-label">Principio científico</div>
+            <div className="ol-science-title">Sobrecarga Progresiva</div>
+            <div className="ol-science-desc">
+              Para seguir ganando fuerza o masa muscular, el cuerpo necesita estímulos
+              que superen su nivel de adaptación actual. Sin aumento progresivo del estímulo,
+              el progreso se detiene. Existen 5 formas de aplicarlo — no todas al mismo tiempo.
+            </div>
+          </div>
+
+          {/* 5 methods */}
+          <div className="ol-methods">
+            {METHODS.map((m, i) => (
+              <div key={i} className="ol-method-card">
+                <div className="ol-method-icon">{m.icon}</div>
+                <div className="ol-method-body">
+                  <div className="ol-method-title">{m.title}</div>
+                  <div className="ol-method-desc">{m.desc}</div>
+                  <span className="ol-method-tag">{m.tag}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Rules */}
+          <div className="ol-rules-card">
+            <div className="ol-rules-title">Reglas de progresión</div>
+            <div className="ol-rules-list">
+              {RULES.map((r, i) => (
+                <div key={i} className="ol-rule-row">
+                  <div className="ol-rule-dot" />
+                  <div className="ol-rule-text">{r.text}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Personal tracking table */}
+          <div className="ol-table-title">Tu progreso por ejercicio</div>
+          {olRows.length === 0 ? (
+            <div className="ol-no-data">
+              Aún no hay pesos registrados.<br />
+              Agrega pesos en el tracker y<br />
+              aparecerán aquí semana a semana.
+            </div>
+          ) : (
+            <div className="ol-table-card">
+              <div className="ol-table-header">
+                <span>Ejercicio</span>
+                <span>Anterior</span>
+                <span>Actual</span>
+                <span>Trend</span>
+              </div>
+              {olRows.map(({ name, lastWeight, prevWeight, delta, wn, grp }) => {
+                const trendClass = delta === null ? 'same' : delta > 0 ? 'up' : delta < 0 ? 'down' : 'same';
+                const trendIcon  = delta === null ? '—' : delta > 0 ? '↑' : delta < 0 ? '↓' : '→';
+                const trendLabel = delta === null ? 'nuevo' : delta > 0 ? `+${delta.toFixed(1)}kg` : delta < 0 ? `${delta.toFixed(1)}kg` : 'igual';
+                return (
+                  <div key={name} className="ol-table-row">
+                    <div>
+                      <div className="ol-table-name">{name}</div>
+                      {grp && <div className="ol-table-name-sub">{grp.label}</div>}
+                    </div>
+                    <div className="ol-table-val">{prevWeight ? `${prevWeight}kg` : '—'}</div>
+                    <div className="ol-table-val">{lastWeight}kg</div>
+                    <div>
+                      <span className={`ol-trend-badge ${trendClass}`}>
+                        {trendIcon} {trendLabel}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
     };
@@ -2104,11 +2704,13 @@ export default function Apex({ user, onSignOut }) {
           <div className="section-title">Progreso</div>
           <div className="prog-tabs">
             <button className={`prog-tab ${progressTab === 'calendar' ? 'active' : ''}`} onClick={() => setProgressTab('calendar')}>Calendario</button>
-            <button className={`prog-tab ${progressTab === 'categories' ? 'active' : ''}`} onClick={() => setProgressTab('categories')}>Categorías</button>
+            <button className={`prog-tab ${progressTab === 'categories' ? 'active' : ''}`} onClick={() => setProgressTab('categories')}>Grupos</button>
+            <button className={`prog-tab ${progressTab === 'overload' ? 'active' : ''}`} onClick={() => setProgressTab('overload')}>Overload</button>
             <button className={`prog-tab ${progressTab === 'exercises' ? 'active' : ''}`} onClick={() => setProgressTab('exercises')}>Ejercicios</button>
           </div>
           {progressTab === 'calendar'   && renderCalTab()}
           {progressTab === 'categories' && renderCatTab()}
+          {progressTab === 'overload'   && renderOverloadTab()}
           {progressTab === 'exercises'  && renderExTab()}
         </div>
       </>
@@ -2134,10 +2736,44 @@ export default function Apex({ user, onSignOut }) {
     setScreen(id);
   };
 
+  // ── Protocol Change Modal ─────────────────────────────────────────────────
+  const renderProtocolModal = () => {
+    if (!showProtocolModal || !pendingSchedule) return null;
+    const fromLabel = pendingSchedule === 'B' ? 'A · Fuerza' : 'B · Hipertrofia';
+    const toLabel   = pendingSchedule === 'A' ? 'A · Fuerza' : 'B · Hipertrofia';
+    const toDetail  = pendingSchedule === 'A'
+      ? '3–4 sets · 4–8 reps · 2–4 min descanso'
+      : '2–3 sets · 8–15 reps · ~90 seg descanso';
+    return (
+      <div className="modal-overlay" onClick={() => { setShowProtocolModal(false); setPendingSchedule(null); }}>
+        <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+          <div className="modal-handle" />
+          <div className="modal-icon">⚠️</div>
+          <div className="modal-title">Cambiar protocolo</div>
+          <div className="modal-desc">
+            Estás a punto de cambiar el protocolo de <strong>{fromLabel}</strong> a <strong>{toLabel}</strong> para esta semana.
+          </div>
+          <div className="modal-warning">
+            <strong>Ten en cuenta:</strong> Los ejercicios se mantienen igual, pero los sets y reps cambiarán a <strong>{toDetail}</strong>. Esto afecta a todos los días de entrenamiento de resistencia de esta semana.
+          </div>
+          <div className="modal-actions">
+            <button className="modal-cancel" onClick={() => { setShowProtocolModal(false); setPendingSchedule(null); }}>
+              Cancelar
+            </button>
+            <button className="modal-confirm" onClick={() => applyScheduleChange(pendingSchedule)}>
+              Cambiar a {toLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       <style>{css}</style>
       {toast && <div className={`toast ${toast.type === "info" ? "info" : ""}`}>{toast.msg}</div>}
+      {renderProtocolModal()}
       <div className="app">
         {screen === "tracker"  ? renderTracker()  :
          screen === "week"     ? renderWeek()     :
