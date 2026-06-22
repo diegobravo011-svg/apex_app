@@ -153,7 +153,7 @@ const BASE_DAYS = {
   vie: { label: "Viernes",  name: "HIIT",          type: "Alta intensidad", warmup: false, isCardio: true,
     exercises: [
       { name: "HIIT",          muscle: "8–12 rondas · sprint 20–60s", activity: "" },
-      { name: "V-Ups / Bicicleta", muscle: "Abdominales",              activity: "3×20" },
+      { name: "V-Ups / Bicicleta", muscle: "Abdominales", weight: "—", reps: "3×20", isStrength: true },
     ],
   },
   sab: { label: "Sábado",   name: "Brazos",        type: "Fuerza",          warmup: true,  isCardio: false },
@@ -281,27 +281,56 @@ const mergeWithTemplate = (weekData) => {
 
 // ─── WEEK TEMPLATE HELPERS ────────────────────────────────────────────────────
 // Returns a full template with resistance day exercises from pool A or B,
-// and optionally pre-fills weights from the previous week.
-const buildFullTemplate = (sched, prevWeights = {}) => {
+// and optionally pre-fills weights and exercise list from the previous week.
+// prevWeekData: the full week data object of the previous week (for full exercise inheritance)
+const buildFullTemplate = (sched, prevWeights = {}, prevWeekData = null) => {
   const pool = sched === "A" ? EXERCISES_A : EXERCISES_B;
   return Object.fromEntries(
     DAY_ORDER.map(dayKey => {
       const base = BASE_DAYS[dayKey];
       let exercises;
       if (RESISTANCE_DAYS.includes(dayKey)) {
-        exercises = (pool[dayKey] || []).map(ex => ({
+        // Start with template exercises, fill in saved weights
+        const templateExs = (pool[dayKey] || []).map(ex => ({
           ...ex,
           weight: prevWeights[dayKey]?.[ex.name] ?? ex.weight,
         }));
+        // Add any custom exercises from the prev week that are NOT in the template
+        if (prevWeekData) {
+          const prevExs = prevWeekData.days?.[dayKey]?.exercises || [];
+          const templateNames = new Set(templateExs.map(e => e.name));
+          const customExs = prevExs
+            .filter(e => !templateNames.has(e.name))
+            .map(e => ({ ...e, done: false, id: undefined }));
+          exercises = [...templateExs, ...customExs];
+        } else {
+          exercises = templateExs;
+        }
       } else {
-        exercises = base.exercises || [];
+        // For non-resistance days: inherit all exercises from previous week if available
+        if (prevWeekData) {
+          const prevExs = prevWeekData.days?.[dayKey]?.exercises || [];
+          if (prevExs.length > 0) {
+            // Copy exercises, resetting done/activity state but keeping metadata
+            exercises = prevExs.map(e => ({
+              ...e,
+              done: false,
+              activity: '', // reset cardio notes for new week
+              id: undefined,
+            }));
+          } else {
+            exercises = base.exercises || [];
+          }
+        } else {
+          exercises = base.exercises || [];
+        }
       }
       return [dayKey, { ...base, exercises }];
     })
   );
 };
 
-// Extracts { dayKey: { exName: weight } } from a week's data (for carrying over weights)
+// Extracts { dayKey: { exName: { weight, reps } } } from a week's data (all days)
 const buildPrevWeights = (wkData) => {
   const result = {};
   for (const dayKey of RESISTANCE_DAYS) {
@@ -782,6 +811,7 @@ export default function Apex({ user, onSignOut }) {
     try {
       let currentMax = maxWeekNum;
       let tempWeeks = { ...weeks };
+      // tempWeeks is used to reference the previous week during sequential creation
       while (currentMax < wNum) {
         const next = currentMax + 1;
         const prevWkData = tempWeeks[currentMax];
@@ -795,7 +825,8 @@ export default function Apex({ user, onSignOut }) {
           newMonStr = newMon.toISOString().slice(0, 10);
         }
         const prevWeights = buildPrevWeights(prevWkData);
-        const template = buildFullTemplate(schedule, prevWeights);
+        // Pass prevWkData to inherit custom and cardio-day exercises
+        const template = buildFullTemplate(schedule, prevWeights, prevWkData);
         const wd = await createFullWeek(user.id, next, schedule, template, newMonStr);
         wd.week_start_date = newMonStr;
         const merged = mergeWithTemplate(wd);
@@ -1399,6 +1430,17 @@ export default function Apex({ user, onSignOut }) {
     .hint-chip-icon { font-size: 11px; opacity: 0.7; }
     .hint-chip-text { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; letter-spacing: 0.2px; }
 
+    /* ── PREV WEEK REFERENCE CHIP ── */
+    .prev-ref-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: #F5F3EE; border: 1px solid #DDD9D2;
+      border-radius: 8px; padding: 4px 9px; margin-top: 7px;
+    }
+    .prev-ref-label { font-size: 9px; color: var(--muted); font-family: 'DM Mono', monospace; opacity: 0.7; }
+    .prev-ref-data { font-size: 10px; color: var(--text); font-family: 'DM Mono', monospace; font-weight: 500; }
+    .prev-ref-arrow { font-size: 9px; color: var(--muted); opacity: 0.6; }
+    .prev-ref-next { font-size: 10px; color: #27AE60; font-family: 'DM Mono', monospace; font-weight: 600; }
+
     /* ── WEEK VIEW ── */
     .week-body { padding: 24px 20px 100px; }
     .section-title { font-size: 22px; font-weight: 300; letter-spacing: -0.5px; margin-bottom: 20px; color: var(--text); }
@@ -1870,11 +1912,22 @@ export default function Apex({ user, onSignOut }) {
   // ─── RENDER EXERCISE ROW ──────────────────────────────────────────────────
   const renderExRow = (ex) => {
     const isEditing = editId === ex.id;
-    const isCardioDay = dayData?.isCardio;
-    const isFixedWeight = ex.weight === "—"; // abs exercises with fixed weight marker
+    // isStrength: true for force exercises even on cardio days (e.g. V-Ups on Friday)
+    const isStrengthEx = !!(ex.isStrength || BASE_DAYS[activeDay]?.exercises?.find(t => t.name === ex.name)?.isStrength);
+    const isCardioDay = dayData?.isCardio && !isStrengthEx;
+    const isFixedWeight = ex.weight === "—"; // abs/bodyweight exercises with fixed weight marker
     // Look up hint from template (not stored in DB) — recovery day reminders
     const templateHint = BASE_DAYS[activeDay]?.exercises?.find(t => t.name === ex.name)?.hint;
     const isHint = !!templateHint;
+
+    // ── Previous week reference data
+    const prevWeekData = weeks[trackerWeekNum - 1];
+    const prevEx = prevWeekData?.days?.[activeDay]?.exercises?.find(e => e.name === ex.name);
+    const prevWeight = prevEx?.weight && prevEx.weight !== '—' ? parseFloat(prevEx.weight) : null;
+    const prevReps = prevEx?.reps || getTemplateReps(activeDay, ex.name);
+    // Suggested next weight: +1.5%, rounded to nearest 0.5 kg
+    const suggestedWeight = prevWeight ? Math.round(prevWeight * 1.015 * 2) / 2 : null;
+    const showPrevRef = !isCardioDay && !isHint && prevEx && (prevWeight || prevReps);
 
     return (
       <div key={ex.id} className="ex-row" onClick={() => !isEditing && toggle(ex.id)}>
@@ -1887,6 +1940,23 @@ export default function Apex({ user, onSignOut }) {
         <div className="ex-body" onClick={e => e.stopPropagation()}>
           <div className={`ex-name ${ex.done ? "done" : ""}`} onClick={() => toggle(ex.id)}>{ex.name}</div>
           <div className="ex-muscle">{ex.muscle}</div>
+
+          {/* Previous week reference chip */}
+          {showPrevRef && !isEditing && (
+            <div className="prev-ref-chip">
+              <span className="prev-ref-label">S{trackerWeekNum - 1}:</span>
+              {prevWeight && !isFixedWeight && (
+                <span className="prev-ref-data">{prevWeight} kg</span>
+              )}
+              {prevReps && <span className="prev-ref-data">{prevReps}</span>}
+              {suggestedWeight && !isFixedWeight && suggestedWeight !== prevWeight && (
+                <>
+                  <span className="prev-ref-arrow">→</span>
+                  <span className="prev-ref-next">{suggestedWeight} kg</span>
+                </>
+              )}
+            </div>
+          )}
 
           {isHint ? (
             // Reminder-only chip: tap the row to tick, no editable form
@@ -1914,7 +1984,7 @@ export default function Apex({ user, onSignOut }) {
                       step="0.5"
                       value={editVals.weight ?? ex.weight}
                       onChange={e => setEditVals(v => ({ ...v, weight: e.target.value }))}
-                      placeholder="0"
+                      placeholder={suggestedWeight ?? "0"}
                     />
                     <span className="weight-kg-label">kg</span>
                   </div>
@@ -1930,7 +2000,7 @@ export default function Apex({ user, onSignOut }) {
                 </div>
               </div>
               {/* Bilateral toggle for dumbbell exercises */}
-              {!isCardioDay && !isFixedWeight && (
+              {!isFixedWeight && (
                 <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button
                     className={`chip ${(editVals.bilateral ?? bilateralMap[ex.name]) ? 'editing' : ''}`}
