@@ -11,6 +11,7 @@ import {
   upsertWeek,
   upsertDay,
   getCurrentWeekMonday,
+  updateWeekDates,
 } from "./lib/db";
 
 // ─── PROTOCOL CONTEXT PER DAY ─────────────────────────────────────────────────
@@ -450,6 +451,17 @@ function computeRealWeekNum(weeksMap) {
   return bestNum;
 }
 
+// Adds or subtracts days to a YYYY-MM-DD date string without timezone offset issues
+function addDaysToDateString(dateStr, days) {
+  const parts = dateStr.split('-');
+  const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  date.setDate(date.getDate() + days);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export default function Apex({ user, onSignOut }) {
   const [screen, setScreen]       = useState("tracker");
   const [activeDay, setActiveDay] = useState(DAY_ORDER[TODAY_IDX]);
@@ -535,6 +547,30 @@ export default function Apex({ user, onSignOut }) {
               }
             }
             if (inserted.length) day.exercises = inserted;
+          }
+        }
+
+        // ── Self-healing: Ensure week_start_date values are contiguous
+        // If week N starts on D, week N+1 must start on D + 7 days.
+        const sortedWeekNums = Object.keys(data.weeks).map(Number).sort((a, b) => a - b);
+        for (let i = 1; i < sortedWeekNums.length; i++) {
+          const prevNum = sortedWeekNums[i - 1];
+          const currNum = sortedWeekNums[i];
+          const prevWk = data.weeks[prevNum];
+          const currWk = data.weeks[currNum];
+          if (prevWk?.week_start_date) {
+            const expectedStart = addDaysToDateString(prevWk.week_start_date, 7);
+            if (currWk.week_start_date !== expectedStart) {
+              const parts = expectedStart.split('-');
+              const dateLabel = `${parts[2]}/${parts[1]}`; // "dd/mm"
+              try {
+                await updateWeekDates(currWk._weekId, expectedStart, dateLabel);
+                currWk.week_start_date = expectedStart;
+                currWk.date = dateLabel;
+              } catch (e) {
+                console.warn("Self-healing failed to update dates for week", currNum, e);
+              }
+            }
           }
         }
 
@@ -735,12 +771,16 @@ export default function Apex({ user, onSignOut }) {
   // ─── New week: crea la SIGUIENTE semana (después de la máxima)
   const newWeek = async () => {
     const next = maxWeekNum + 1;
-    // Calcular el lunes de la nueva semana: lunes de esta semana + 7*diferencia
-    const todayMon = getCurrentWeekMonday();
-    // La nueva semana empieza 7*(next - realWeekNum) días después del lunes actual
-    const newMon = new Date(todayMon);
-    newMon.setDate(newMon.getDate() + 7 * (next - realWeekNum));
-    const newMonStr = newMon.toISOString().slice(0, 10);
+    let newMonStr;
+    const prevWkData = weeks[maxWeekNum];
+    if (prevWkData?.week_start_date) {
+      newMonStr = addDaysToDateString(prevWkData.week_start_date, 7);
+    } else {
+      const todayMon = getCurrentWeekMonday();
+      const newMon = new Date(todayMon + 'T00:00:00');
+      newMon.setDate(newMon.getDate() + 7 * (next - realWeekNum));
+      newMonStr = newMon.toISOString().slice(0, 10);
+    }
     setLoading(true);
     try {
       // Usar los pesos de la semana máxima actual

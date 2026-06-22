@@ -57,6 +57,14 @@ export async function updateWeekSchedule(weekId, schedule) {
   if (error) throw error
 }
 
+export async function updateWeekDates(weekId, weekStartDate, dateLabel) {
+  const { error } = await supabase
+    .from('weeks')
+    .update({ week_start_date: weekStartDate, date: dateLabel })
+    .eq('id', weekId)
+  if (error) throw error
+}
+
 // ─── DAYS ────────────────────────────────────────────────────────────────────
 
 export async function getDaysForWeek(weekId) {
