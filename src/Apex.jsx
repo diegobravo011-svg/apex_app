@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   loadAllData,
   createFullWeek,
@@ -482,6 +482,13 @@ export default function Apex({ user, onSignOut }) {
   // bilateral: { "Lateral Raise": true, … } — stored in localStorage, keyed by exercise name
   const [bilateralMap, setBilateralMap] = useState(loadBilateral);
 
+  // ─── Swipe navigation state and refs
+  const [slideDirection, setSlideDirection] = useState(null);
+  const swipeStartX = useRef(null);
+  const swipeStartY = useRef(null);
+  const isSwiping = useRef(false);
+  const swipeOccurred = useRef(false);
+
   // ─── Remote state
   const [weeks, setWeeks]             = useState({});
   // trackerWeekNum: la semana que muestra el TRACKER (puede ser pasada para editar)
@@ -768,38 +775,111 @@ export default function Apex({ user, onSignOut }) {
     catch { showToast("Error al reiniciar día"); }
   };
 
-  // ─── New week: crea la SIGUIENTE semana (después de la máxima)
-  const newWeek = async () => {
-    const next = maxWeekNum + 1;
-    let newMonStr;
-    const prevWkData = weeks[maxWeekNum];
-    if (prevWkData?.week_start_date) {
-      newMonStr = addDaysToDateString(prevWkData.week_start_date, 7);
-    } else {
-      const todayMon = getCurrentWeekMonday();
-      const newMon = new Date(todayMon + 'T00:00:00');
-      newMon.setDate(newMon.getDate() + 7 * (next - realWeekNum));
-      newMonStr = newMon.toISOString().slice(0, 10);
-    }
+  // ─── Ensure week exists in database and local state (creates all intermediate weeks sequentially)
+  const ensureWeekExists = async (wNum) => {
+    if (weeks[wNum]) return;
     setLoading(true);
     try {
-      // Usar los pesos de la semana máxima actual
-      const prevWkData = weeks[maxWeekNum];
-      const prevWeights = buildPrevWeights(prevWkData);
-      const template = buildFullTemplate(schedule, prevWeights);
-      const wd = await createFullWeek(user.id, next, schedule, template, newMonStr);
-      wd.week_start_date = newMonStr;
-      const merged = mergeWithTemplate(wd);
-      merged.week_start_date = newMonStr;
-      setWeeks(prev => ({ ...prev, [next]: merged }));
-      setMaxWeekNum(next);
-      setViewedWeekNum(next);
-      showToast(`Semana ${next} creada con pesos heredados ✓`, "info");
+      let currentMax = maxWeekNum;
+      let tempWeeks = { ...weeks };
+      while (currentMax < wNum) {
+        const next = currentMax + 1;
+        const prevWkData = tempWeeks[currentMax];
+        let newMonStr;
+        if (prevWkData?.week_start_date) {
+          newMonStr = addDaysToDateString(prevWkData.week_start_date, 7);
+        } else {
+          const todayMon = getCurrentWeekMonday();
+          const newMon = new Date(todayMon + 'T00:00:00');
+          newMon.setDate(newMon.getDate() + 7 * (next - realWeekNum));
+          newMonStr = newMon.toISOString().slice(0, 10);
+        }
+        const prevWeights = buildPrevWeights(prevWkData);
+        const template = buildFullTemplate(schedule, prevWeights);
+        const wd = await createFullWeek(user.id, next, schedule, template, newMonStr);
+        wd.week_start_date = newMonStr;
+        const merged = mergeWithTemplate(wd);
+        tempWeeks[next] = merged;
+        currentMax = next;
+      }
+      setWeeks(tempWeeks);
+      setMaxWeekNum(wNum);
     } catch (err) {
       showToast("Error al crear semana: " + err.message);
+      throw err;
     } finally {
       setLoading(false);
     }
+  };
+
+  // ─── New week: crea la SIGUIENTE semana (después de la máxima)
+  const newWeek = async () => {
+    const next = maxWeekNum + 1;
+    try {
+      await ensureWeekExists(next);
+      setViewedWeekNum(next);
+      setTrackerWeekNum(next);
+      showToast(`Semana ${next} creada con pesos heredados ✓`, "info");
+    } catch (err) {
+      // already handled in ensureWeekExists
+    }
+  };
+
+  // ─── Swipe gesture handlers
+  const handleSwipeStart = (clientX, clientY) => {
+    swipeStartX.current = clientX;
+    swipeStartY.current = clientY;
+    isSwiping.current = true;
+    swipeOccurred.current = false;
+  };
+
+  const handleSwipeEnd = (clientX, clientY) => {
+    if (!isSwiping.current) return;
+    isSwiping.current = false;
+    if (swipeStartX.current === null || swipeStartY.current === null) return;
+
+    const diffX = clientX - swipeStartX.current;
+    const diffY = clientY - swipeStartY.current;
+
+    // Minimum horizontal distance 40px, maximum vertical distance 40px to qualify as horizontal swipe
+    if (Math.abs(diffX) > 40 && Math.abs(diffY) < 40) {
+      swipeOccurred.current = true;
+      if (diffX < 0) {
+        // swipe left -> next week
+        handleSwipeWeek(1);
+      } else {
+        // swipe right -> prev week
+        handleSwipeWeek(-1);
+      }
+    }
+    swipeStartX.current = null;
+    swipeStartY.current = null;
+  };
+
+  const handleSwipeWeek = async (direction) => {
+    const targetWeek = trackerWeekNum + direction;
+    const minW = Math.max(1, realWeekNum - 2);
+    const maxW = realWeekNum + 2;
+
+    if (targetWeek < minW || targetWeek > maxW) {
+      showToast(direction > 0 ? "Límite: máximo 2 semanas al futuro" : "Límite: máximo 2 semanas al pasado", "info");
+      return;
+    }
+
+    setSlideDirection(direction > 0 ? "left" : "right");
+
+    if (targetWeek > maxWeekNum) {
+      await ensureWeekExists(targetWeek);
+    }
+
+    setTrackerWeekNum(targetWeek);
+    if (targetWeek === realWeekNum) {
+      setActiveDay(DAY_ORDER[TODAY_IDX]);
+    }
+
+    setTimeout(() => {
+      setSlideDirection(null);
+    }, 300);
   };
 
   // ─── Toggle schedule A/B: if the week already has a schedule locked, show a disclaimer first
@@ -1051,6 +1131,21 @@ export default function Apex({ user, onSignOut }) {
     /* ── DAY STRIP ── */
     .day-strip { display: flex; gap: 6px; padding: 18px 20px 0; overflow-x: auto; scrollbar-width: none; }
     .day-strip::-webkit-scrollbar { display: none; }
+    
+    @keyframes slideInFromRight {
+      from { transform: translateX(35px); opacity: 0.6; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes slideInFromLeft {
+      from { transform: translateX(-35px); opacity: 0.6; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .day-strip.anim-slide-left {
+      animation: slideInFromRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    .day-strip.anim-slide-right {
+      animation: slideInFromLeft 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
     .day-btn {
       display: flex; flex-direction: column; align-items: center; gap: 4px;
       padding: 8px 0 6px; width: 44px; border-radius: 22px;
@@ -1885,7 +1980,8 @@ export default function Apex({ user, onSignOut }) {
     const ringR   = 26;
     const ringC   = 2 * Math.PI * ringR;
     const ringOff = ringC - (pct / 100) * ringC;
-    const isViewingPastWeekInTracker = trackerWeekNum !== realWeekNum;
+    const isViewingPastWeekInTracker = trackerWeekNum < realWeekNum;
+    const isViewingFutureWeekInTracker = trackerWeekNum > realWeekNum;
 
     return (
       <>
@@ -1924,19 +2020,61 @@ export default function Apex({ user, onSignOut }) {
           </div>
         )}
 
-        <div className="day-strip">
+        {/* Banner de semana futura */}
+        {isViewingFutureWeekInTracker && (
+          <div style={{
+            margin: '8px 20px 0', padding: '10px 14px',
+            background: '#EBF5FF', border: '1px solid #3B82F6',
+            borderRadius: 10, display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', gap: 10,
+          }}>
+            <span style={{ fontSize: 12, color: '#1E3A8A', fontFamily: 'DM Sans' }}>
+              🚀 Planificando <strong>semana {trackerWeekNum}</strong> — semana futura
+            </span>
+            <button
+              style={{
+                fontSize: 11, color: '#1E3A8A', background: 'transparent',
+                border: '1px solid #3B82F6', borderRadius: 20, padding: '3px 10px',
+                cursor: 'pointer', fontFamily: 'DM Sans', whiteSpace: 'nowrap',
+              }}
+              onClick={() => {
+                setTrackerWeekNum(realWeekNum);
+                setActiveDay(DAY_ORDER[TODAY_IDX]);
+              }}
+            >
+              volver a hoy
+            </button>
+          </div>
+        )}
+
+        <div
+          className={`day-strip ${slideDirection ? `anim-slide-${slideDirection}` : ""}`}
+          onTouchStart={e => handleSwipeStart(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchEnd={e => handleSwipeEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY)}
+          onMouseDown={e => handleSwipeStart(e.clientX, e.clientY)}
+          onMouseUp={e => handleSwipeEnd(e.clientX, e.clientY)}
+          onMouseLeave={e => {
+            if (isSwiping.current) {
+              isSwiping.current = false;
+              swipeStartX.current = null;
+              swipeStartY.current = null;
+            }
+          }}
+          style={{ cursor: 'grab', userSelect: 'none' }}
+        >
           {DAY_ORDER.map((d, idx) => {
             const p = getProgress(d);
             const dayKey = getDayKey(idx);
             const creatineTaken = !!creatine[dayKey];
-            // isToday solo si estamos en la semana real
-            const isToday = !isViewingPastWeekInTracker && idx === TODAY_IDX;
+            const isToday = trackerWeekNum === realWeekNum && idx === TODAY_IDX;
             // Get day-of-month number from the dayKey (YYYY-MM-DD)
             const dayNum = parseInt(dayKey.split('-')[2], 10);
             return (
               <button key={d}
                 className={`day-btn ${activeDay === d ? "active" : ""} ${isToday ? "today-btn" : ""}`}
-                onClick={() => { setActiveDay(d); setEditId(null); setShowAdd(false); }}>
+                onClick={() => { if (swipeOccurred.current) return; setActiveDay(d); setEditId(null); setShowAdd(false); }}
+                style={{ pointerEvents: 'auto' }}
+              >
                 <span className="day-lbl">{d.toUpperCase()}</span>
                 <span className="day-date-num">{dayNum}</span>
                 <div className={`day-pip ${p === 100 ? "full" : p > 0 ? "partial" : ""}`} />
